@@ -171,13 +171,13 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 const MAXE = 6, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;
 const CS = 4, WALL_H = 4.2, CEIL_H = 11, EYE = 2.05, RAMP_H = 1.3;
 const walls = [], dotAt = [], SPAWNS = [], dotList = [], grid = [], hgt = [], rampRuns = [];
 let playerStart = { c: 9, r: 15 };
-const isPen = (c, r) => (r === 9 + OFF && c >= 8 + OFF && c <= 10 + OFF) || (r === 8 + OFF && c === 9 + OFF);
+const isPen = () => false; /* no pen any more: zombies rise out of the ground around the middle of the map */
 function wallAt(x, z) {
   const c = Math.floor(x / CS), r = Math.floor(z / CS);
   return c < 0 || r < 0 || c >= COLS || r >= ROWS || walls[r][c];
@@ -273,8 +273,7 @@ function genGrid(sd, lv) {
   const rnd = mkRnd((Math.imul(sd | 0, 2654435761) ^ Math.imul(lv, 40503) ^ 0x9e3779b9) >>> 0);
   const g = []; for (let r = 0; r < R; r++) g.push(new Array(C).fill('#'));
   const cr0 = 6 + e, cc0 = 4 + e;
-  const inCore = (c, r) => r >= cr0 && r <= cr0 + 6 && c >= cc0 && c <= cc0 + 10;
-  for (let r = 6; r <= 12; r++) for (let c = 4; c <= 14; c++) g[r + e][c + e] = TEMPLATE[r][c];
+  const inCore = () => false;
   const free = (c, r) => c >= 1 && c <= C - 2 && r >= 1 && r <= R - 2 && !inCore(c, r);
   const forced = new Set(), F = (c, r) => forced.add(r * C + c);
   for (let r = 1; r <= R - 2; r++) for (let c = 1; c <= mid; c++) {
@@ -286,10 +285,6 @@ function genGrid(sd, lv) {
   }
   for (let r = 1; r <= R - 2; r++) for (let c = 1; c < mid; c++) if (free(c, r)) g[r][C - 1 - c] = g[r][c];
   /* the doors in the fixed core (top and bottom rows) must have open cells outside them */
-  for (let c = cc0; c <= cc0 + 10; c++) {
-    if (g[cr0][c] !== '#') { g[cr0 - 1][c] = '.'; F(c, cr0 - 1); }
-    if (g[cr0 + 6][c] !== '#') { g[cr0 + 7][c] = '.'; F(c, cr0 + 7); }
-  }
   const pr = 15 + e;
   for (let c = 5 + e; c <= 13 + e; c++) { g[pr][c] = '.'; F(c, pr); }
   g[pr][mid] = 'P';
@@ -377,7 +372,15 @@ function genGrid(sd, lv) {
     for (let r = r0; r <= r1; r++) for (let c = 1; c < mid; c++) if (free(c, r) && g[r][c] === '.' && !forced.has(r * C + c) && Math.abs(c - mid) + Math.abs(r - pr) > 6) cs.push([c, r]);
     if (cs.length) { const [c, r] = cs[Math.floor(rnd() * cs.length)]; setM(c, r, 'o'); }
   };
-  pick(1, cr0 - 1); pick(cr0 + 7, R - 2);
+  const half = Math.floor(R / 2);
+  pick(1, half - 1); pick(half + 1, R - 2);
+  /* zombie start cells: two mirrored pairs in the middle band of the maze */
+  for (let n = 0; n < 2; n++) {
+    let cs = [];
+    for (let wide = 0; wide < 3 && !cs.length; wide++)
+      for (let r = half - 3 - wide; r <= half + 3 + wide; r++) for (let c = 2; c < mid; c++) if (g[r][c] === '.' && !forced.has(r * C + c)) cs.push([c, r]);
+    if (cs.length) { const [c, r] = cs[Math.floor(rnd() * cs.length)]; setM(c, r, 'G'); }
+  }
   /* ramps: a straight tunnel-like run of 3 to 5 cells rises, runs flat, then comes back down */
   const cand = [];
   for (let L = 3; L <= 5; L++) {
@@ -443,7 +446,7 @@ function genMap(sd, lv) {
 function applyMap() {
   floor.scale.set(COLS * CS, ROWS * CS, 1); floor.position.set(COLS * CS / 2, 0, ROWS * CS / 2); floorTex.repeat.set(COLS, ROWS);
   ceil.scale.set(COLS * CS, ROWS * CS, 1); ceil.position.set(COLS * CS / 2, CEIL_H, ROWS * CS / 2);
-  gateBars.forEach(b => b.position.set((9.5 + OFF) * CS, b.position.y, (8.5 + OFF) * CS));
+  gateBars.forEach(b => { b.visible = false; });
   let n = 0;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (walls[r][c]) { m4.makeTranslation((c + 0.5) * CS, WALL_H / 2, (r + 0.5) * CS); wallMesh.setMatrixAt(n++, m4); }
   wallMesh.count = n; wallMesh.instanceMatrix.needsUpdate = true;
@@ -710,8 +713,43 @@ function sever(z, idx) {
   severFx(z, idx);
   if (idx < 2 && z.mode === 'walk') { z.mode = 'fall'; z.modeT = 0; z.slow = 0; }
 }
-function placeZombie(z, idx, delay) {
-  const s = SPAWNS[idx];
+const RISE = 1.4;
+/* a fresh spawn: somewhere in the middle of the maze, as far from every living player as it can be */
+function pickSpawn() {
+  const cx = Math.floor(COLS / 2), cy = Math.floor(ROWS / 2), cand = [];
+  for (let r = cy - 5; r <= cy + 5; r++) for (let c = cx - 6; c <= cx + 6; c++) {
+    if (c < 1 || r < 1 || c >= COLS - 1 || r >= ROWS - 1 || walls[r][c] || hgt[r][c]) continue;
+    const x = (c + 0.5) * CS, zz = (r + 0.5) * CS;
+    let md = 1e9;
+    for (const p of netPlayers()) if (p.a) md = Math.min(md, Math.hypot(p.x - x, p.z - zz));
+    for (const o of zombies) if (o.state === 'house') md = Math.min(md, Math.hypot(o.x - x, o.z - zz) + 6);
+    cand.push({ c, r, md });
+  }
+  const far = cand.filter(o => o.md >= 18);
+  if (far.length) return far[Math.floor(Math.random() * far.length)];
+  cand.sort((a, b) => b.md - a.md);
+  return cand[0] || SPAWNS[0];
+}
+/* shared by the host and the clients: stay underground, then claw up out of the floor */
+function riseAnim(z) {
+  const m = z.mesh, fy = floorY(z.x, z.z);
+  z.bar.visible = false;
+  if (z.timer > RISE) { m.position.set(z.x, fy - 3.2, z.z); m.visible = true; z.dirtK = -1; return; }
+  const k = 1 - Math.max(0, z.timer) / RISE, e = k * k * (3 - 2 * k);
+  m.visible = true; m.rotation.set(0, z.rot, 0);
+  m.position.set(z.x, fy - 2.7 * (1 - e) + Math.sin(z.anim * 9) * 0.03 * (1 - e), z.z);
+  animLimbs(z, 0.3);
+  for (let i = 0; i < 2; i++) if (!z.lost[2 + i]) z.arms[i].rotation.x = 3.0 - 1.4 * e + Math.sin(z.anim * 7 + i) * 0.25;
+  z.head.rotation.x = -0.35 * (1 - e);
+  const dk = Math.floor(z.timer * 8);
+  if (dk !== z.dirtK) {
+    if (z.dirtK === -1) tone(70, 0.7, 'sawtooth', 0.07 * Math.max(0.15, 1 - Math.hypot(z.x - px, z.z - pz) / 45), -25);
+    z.dirtK = dk; burst(z.x + (Math.random() - 0.5) * 1.2, fy + 0.1, z.z + (Math.random() - 0.5) * 1.2, 0x6b5a3a, 3, 3);
+  }
+}
+function placeZombie(z, idx, delay, fresh) {
+  const s = fresh ? pickSpawn() : SPAWNS[idx];
+  z.rot = Math.random() * 6.28; z.dirtK = -1;
   z.c = z.nc = s.c; z.r = z.nr = s.r; z.x = (s.c + 0.5) * CS; z.z = (s.r + 0.5) * CS;
   z.dir = [0, 0]; z.state = 'house'; z.timer = delay; z.slow = 0; z.deadT = 0; resetLimbs(z);
   z.hp = z.maxHp = 3 + (level - 1);
@@ -884,7 +922,7 @@ function updateZombie(z, dt) {
   if (z.state === 'dead') {
     z.deadT += dt; animDeath(z);
     z.respawn -= dt;
-    if (z.respawn <= 0) placeZombie(z, 2, 2.5);
+    if (z.respawn <= 0) placeZombie(z, z.i, RISE + 1.2, true);
     return;
   }
   if (freezeT > 0 && z.state !== 'house') return;
@@ -899,8 +937,8 @@ function updateZombie(z, dt) {
   if (z.mode === 'crawl') z.modeT += dt;
   if (z.state === 'house') {
     z.timer -= dt; z.anim += dt * 2;
-    m.position.set(z.x, Math.sin(z.anim * 2) * 0.05, z.z); animLimbs(z, 0.4);
-    if (z.timer <= 0) { z.state = z.r <= 7 + OFF ? 'active' : 'leaving'; setTarget(z); chooseNext(z); }
+    riseAnim(z);
+    if (z.timer <= 0) { z.state = 'active'; z.dir = [0, 0]; setTarget(z); chooseNext(z); }
     return;
   }
   const sp = zSpeed() * (z.slow > 0 ? 0.4 : 1) * (z.mode === 'crawl' ? crawlMul(z) : 1);
@@ -1083,7 +1121,7 @@ function movePlayer(dt) {
   for (const s of specials) {
     if (s.kind !== 'wall') continue;
     const hh = 2.35, ddx = px - s.x, ddz = pz - s.z;
-    if (Math.abs(ddx) < hh && Math.abs(ddz) < hh && py < floorY(s.x, s.z) + WALL_H) {
+    if (Math.abs(ddx) < hh && Math.abs(ddz) < hh && py < floorY(s.x, s.z) + WALL_BH) {
       let nx = px, nz = pz;
       if (hh - Math.abs(ddx) < hh - Math.abs(ddz)) nx = s.x + (ddx < 0 ? -hh : hh); else nz = s.z + (ddz < 0 ? -hh : hh);
       if (!blockedP(nx, nz, R)) { px = nx; pz = nz; }
@@ -1102,6 +1140,7 @@ function movePlayer(dt) {
     }
   }
   bobT += dt * (moving && onGround ? (running ? 13 : 9) : 0);
+  if (moving && onGround) { const sn = Math.floor(bobT / Math.PI); if (sn !== stepN) { stepN = sn; footstep(running ? 0.06 : 0.04, 1); } }
   bobY = moving && onGround ? Math.sin(bobT) * (running ? 0.08 : 0.05) : bobY * 0.8;
   pitCd = Math.max(0, pitCd - dt);
   if (onGround && gy < 0.05 && pitCd <= 0 && invuln <= 0 && !ghost) {
@@ -1159,7 +1198,7 @@ function genPits(lv) {
   const rnd = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const cand = [];
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    if (grid[r][c] === '#' || grid[r][c] === 'o' || hgt[r][c]) continue;
+    if (grid[r][c] === '#' || grid[r][c] === 'o' || grid[r][c] === 'G' || hgt[r][c]) continue;
     if (r >= 5 + OFF && r <= 12 + OFF && c >= 5 + OFF && c <= 13 + OFF) continue;
     if (START_COLS.some(sc => Math.abs(c - sc - OFF) + Math.abs(r - playerStart.r) < 3)) continue;
     cand.push({ c, r });
@@ -1196,11 +1235,23 @@ function pitHit(pit) {
 
 /* a fresh map plus fresh pits for a level */
 const modeLabel = () => 'MODE: ' + ['NORMAL', 'FAST ZOMBS', 'INSANE'][gameMode];
-function buildLevel(lv) { genMap(seed, lv); applyMap(); genPits(lv); buildSpecials(lv); }
+let mapHash = 0;
+function computeMapHash() {
+  const str = grid.map(r => r.join('')).join('|') + specials.map(s => s.kind + Math.round(s.home.x) + ':' + Math.round(s.home.z)).join(',') + pits.map(p => p.c + ':' + p.r).join(',');
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+function buildLevel(lv) { genMap(seed, lv); applyMap(); genPits(lv); buildSpecials(lv); mapHash = computeMapHash(); }
 /* ---------- special zombies: THE WALL, THE CHARGER, THE AMBUSHER ----------
    Every peer builds the same specials from the room seed and the level, the host runs them, clients animate puppets. */
 const specials = [];
-const SP_NAMES = { wall: 'THE WALL', charger: 'THE CHARGER', ambusher: 'THE AMBUSHER' };
+let stepN = 0;
+const WALL_BH = 2.6; /* low enough to hop over from the top of a ramp */
+const trails = {};
+function footstep(v, pitch) { noise(0.045, v); tone(75 * pitch, 0.05, 'sine', v * 1.2, -20); }
+const SP_NAMES = { wall: 'THE WALL', charger: 'THE CHARGER', ambusher: 'THE AMBUSHER', stalker: 'THE STALKER' };
+const SK = { DORMANT: 0, STALK: 1, DEAD: 2 };
 const CH = { WANDER: 0, YELL: 1, CHARGE: 2, SPLAT: 3, RECOVER: 4, DEAD: 5 };
 const AM = { PERCH: 0, LEAP: 1, GROUND: 2, RETURN: 3, DEAD: 4 };
 let shakeMag = 0;
@@ -1217,7 +1268,8 @@ function specialChances(lv) {
   return {
     wall: Math.min(cap, (ins ? 0.5 : 0.08) + (ins ? 0.07 : 0.06) * k),
     charger: Math.min(cap, (ins ? 0.6 : 0.15) + (ins ? 0.08 : 0.07) * k),
-    ambusher: Math.min(cap, (ins ? 0.7 : 0.2) + (ins ? 0.08 : 0.07) * k)
+    ambusher: Math.min(cap, (ins ? 0.7 : 0.2) + (ins ? 0.08 : 0.07) * k),
+    stalker: Math.min(ins ? 0.97 : 0.75, (ins ? 0.4 : 0.06) + (ins ? 0.07 : 0.05) * k)
   };
 }
 function planSpecials(lv) {
@@ -1244,7 +1296,7 @@ function planSpecials(lv) {
   };
   const plan = [], used = [], farOpen = far(open, 12).length ? far(open, 12) : open;
   /* roll in a fixed order so every peer ends up with the same list */
-  const rW = rnd(), rC = rnd(), rA = rnd(), rC2 = rnd(), rN = rnd();
+  const rW = rnd(), rC = rnd(), rA = rnd(), rC2 = rnd(), rN = rnd(), rS = rnd();
   if (rW < ch.wall) { const o = pickFrom(farOpen, used); if (o) plan.push({ kind: 'wall', c: o.c, r: o.r }); }
   if (rC < ch.charger) {
     const n = ins && lv >= 6 && rC2 < 0.5 ? 2 : 1;
@@ -1257,6 +1309,7 @@ function planSpecials(lv) {
       plan.push({ kind: 'ambusher', c: o.c, r: o.r, d: o.d });
     }
   }
+  if (rS < ch.stalker) plan.push({ kind: 'stalker' });
   return plan;
 }
 
@@ -1327,22 +1380,38 @@ function buildAmbusherMesh() {
   b.g.scale.setScalar(0.8);
   return { g: b.g, mats: b.mats, legs, arms, up, head, eyes };
 }
+function buildStalkerMesh() {
+  const b = spBuilder(), { part, piv } = b;
+  const dark = spMat(0x14101c), skin = spMat(0xcfd6c8, 0x9aa89a, 0.2);
+  const eye = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const legs = [-1, 1].map(s => { const p = piv(s * 0.16, 0.95, 0); part(0.2, 0.95, 0.22, dark, 0, -0.475, 0, p); return p; });
+  const up = piv(0, 0.95, 0);
+  part(0.55, 1.05, 0.3, dark, 0, 0.52, 0, up);
+  const head = piv(0, 1.12, -0.05, up);
+  part(0.38, 0.46, 0.38, skin, 0, 0.23, 0, head);
+  part(0.09, 0.07, 0.04, eye, -0.1, 0.28, -0.2, head); part(0.09, 0.07, 0.04, eye, 0.1, 0.28, -0.2, head);
+  part(0.2, 0.04, 0.04, dark, 0, 0.1, -0.2, head);
+  const arms = [-1, 1].map(s => { const p = piv(s * 0.36, 1.35, 0, up); part(0.12, 1.3, 0.12, skin, 0, -0.65, 0, p); return p; });
+  return { g: b.g, mats: b.mats, legs, arms, up, head };
+}
 function makeSpecial(p, id) {
   const lv = level, kind = p.kind;
-  const M = kind === 'wall' ? buildWallMesh() : kind === 'charger' ? buildChargerMesh() : buildAmbusherMesh();
+  const M = kind === 'wall' ? buildWallMesh() : kind === 'charger' ? buildChargerMesh() : kind === 'stalker' ? buildStalkerMesh() : buildAmbusherMesh();
   const s = Object.assign({ id, kind, mesh: M.g, mats: M.mats, legs: M.legs, arms: M.arms, up: M.up, head: M.head, mouth: M.mouth, excl: M.excl, stars: M.stars, eyes: M.eyes }, {
     st: 0, stT: 0, anim: Math.random() * 6, flashT: 0, state: 'active', hp: 1, maxHp: 1, rot: 0, trot: 0, dir: [0, 0], cdir: [0, 0], tc: 0, tr: 0, pause: 0, cool: 0, biteCd: 0, fT: 0, dur: 0, lastStep: 0, dustT: 0, nseen: false
   });
-  s.hp = s.maxHp = kind === 'charger' ? 10 + 3 * lv : kind === 'ambusher' ? 2 + Math.floor(lv / 2) : 1;
+  s.hp = s.maxHp = kind === 'charger' ? 10 + 3 * lv : kind === 'ambusher' ? 2 + Math.floor(lv / 2) : kind === 'stalker' ? 4 + lv : 1;
   if (kind === 'ambusher') {
     const cx = (p.c + 0.5) * CS, cz = (p.r + 0.5) * CS;
     s.home = { x: cx + p.d[0] * 1.7, z: cz + p.d[1] * 1.7, y: WALL_H, rot: Math.atan2(-p.d[0], -p.d[1]) };
+  } else if (kind === 'stalker') {
+    s.home = { x: 0, z: 0, y: 0, rot: 0 }; s.c = s.nc = 0; s.r = s.nr = 0;
   } else {
     s.home = { x: (p.c + 0.5) * CS, z: (p.r + 0.5) * CS, y: 0, rot: 0 };
     s.c = s.nc = p.c; s.r = s.nr = p.r;
   }
-  const bh = kind === 'charger' ? 3.0 : kind === 'ambusher' ? 1.9 : 0;
-  if (bh) { const b = spBar(s.mesh, bh, kind === 'charger' ? 0x2f6bff : 0xffe14a); s.bar = b.bar; s.fill = b.fill; }
+  const bh = kind === 'charger' ? 3.0 : kind === 'ambusher' ? 1.9 : kind === 'stalker' ? 2.7 : 0;
+  if (bh) { const b = spBar(s.mesh, bh, kind === 'charger' ? 0x2f6bff : kind === 'stalker' ? 0xdfe6ff : 0xffe14a); s.bar = b.bar; s.fill = b.fill; }
   scene.add(s.mesh);
   resetSpecial(s);
   return s;
@@ -1351,22 +1420,24 @@ function resetSpecial(s) {
   const h = s.home;
   s.x = s.tx = h.x; s.z = s.tz = h.z; s.y = s.ty = h.y; s.rot = s.trot = h.rot;
   s.st = 0; s.stT = 0; s.pause = 0; s.cool = 1.5; s.state = 'active'; s.flashT = 0; s.nseen = false;
-  s.mesh.visible = true; s.mesh.scale.setScalar(s.kind === 'charger' ? 1.3 : s.kind === 'ambusher' ? 0.8 : 1);
-  if (s.kind !== 'ambusher') { s.c = s.nc = Math.floor(s.x / CS); s.r = s.nr = Math.floor(s.z / CS); s.dir = [0, 0]; }
+  s.mesh.visible = s.kind !== 'stalker'; s.mesh.scale.set(1, 1, 1); s.mesh.scale.setScalar(s.kind === 'charger' ? 1.3 : s.kind === 'ambusher' ? 0.8 : s.kind === 'stalker' ? 1.1 : 1);
+  if (s.kind === 'wall') s.mesh.scale.y = WALL_BH / 4.45;
+  if (s.kind === 'stalker') { s.cool = 14; s.tid = -1; s.idx = 0; s.nseen = false; }
+  if (s.kind !== 'ambusher' && s.kind !== 'stalker') { s.c = s.nc = Math.floor(s.x / CS); s.r = s.nr = Math.floor(s.z / CS); s.dir = [0, 0]; }
   if (s.kind === 'wall') pickChase(s);
   else if (s.kind === 'charger') pickWander(s);
   if (s.fill) { s.fill.scale.x = 1; s.bar.visible = false; }
   flashSpecial(s, false);
 }
-function resetSpecials() { specials.forEach(s => { if (s.kind === 'charger' && s.st === CH.DEAD) return; if (s.kind === 'ambusher' && s.st === AM.DEAD) return; const hp = s.hp; resetSpecial(s); s.hp = hp; if (s.fill) s.fill.scale.x = Math.max(0.001, s.hp / s.maxHp); }); }
+function resetSpecials() { for (const k in trails) delete trails[k]; specials.forEach(s => { if (s.kind === 'charger' && s.st === CH.DEAD) return; if (s.kind === 'ambusher' && s.st === AM.DEAD) return; const hp = s.hp; resetSpecial(s); s.hp = hp; if (s.fill) s.fill.scale.x = Math.max(0.001, s.hp / s.maxHp); }); }
 function clearSpecials() {
   specials.forEach(s => { scene.remove(s.mesh); s.mesh.traverse(o => { if (o.geometry) o.geometry.dispose(); }); });
   specials.length = 0;
 }
 function buildSpecials(lv) {
-  clearSpecials();
+  clearSpecials(); for (const k in trails) delete trails[k];
   planSpecials(lv).forEach((p, i) => specials.push(makeSpecial(p, i)));
-  const names = []; specials.forEach(s => { const n = SP_NAMES[s.kind]; if (names.indexOf(n) < 0) names.push(n); });
+  const names = []; specials.forEach(s => { if (s.kind === 'stalker') return; const n = SP_NAMES[s.kind]; if (names.indexOf(n) < 0) names.push(n); });
   if (names.length) setTimeout(() => { if (state === 'play') toast('WATCH OUT: ' + names.join(', '), '#ff9a2e'); }, 2400);
 }
 function flashSpecial(s, on) {
@@ -1454,13 +1525,58 @@ function simCharger(s, dt) {
     default: break;
   }
 }
+function nearestCrumb(t, x, z) { let bi = 0, bd = 1e9; for (let i = 0; i < t.length; i++) { const d = dist2d(t[i].x, t[i].z, x, z); if (d < bd) { bd = d; bi = i; } } return bi; }
+function recordTrails() {
+  eachPlayer(p => {
+    const t = trails[p.id] || (trails[p.id] = []), l = t[t.length - 1];
+    if (l && dist2d(l.x, l.z, p.x, p.z) > 6) t.length = 0; /* teleported (respawn): start a fresh trail */
+    if (!t.length || dist2d(t[t.length - 1].x, t[t.length - 1].z, p.x, p.z) > 1.2) {
+      t.push({ x: p.x, z: p.z });
+      if (t.length > 1500) { t.shift(); specials.forEach(s => { if (s.kind === 'stalker' && s.tid === p.id) s.idx = Math.max(0, s.idx - 1); }); }
+    }
+  });
+}
+function simStalker(s, dt) {
+  s.stT += dt; s.anim += dt;
+  if (s.st === SK.DORMANT) {
+    s.cool -= dt; if (s.cool > 0) return;
+    let best = null, bl = 19;
+    eachPlayer(p => { const t = trails[p.id]; if (t && t.length > bl) { bl = t.length; best = p; } });
+    if (!best) return;
+    const t = trails[best.id]; let ok = true;
+    eachPlayer(p => { if (dist2d(p.x, p.z, t[0].x, t[0].z) < 16) ok = false; });
+    if (!ok) { s.cool = 2; return; }
+    s.tid = best.id; s.idx = 0; s.x = t[0].x; s.z = t[0].z; s.y = 0;
+    setSpState(s, SK.STALK);
+    return;
+  }
+  if (s.st !== SK.STALK || s.stT < 1.2) return;
+  let tgt = null;
+  eachPlayer(p => { if (p.id === s.tid) tgt = p; });
+  if (!tgt) {
+    let bd = 1e9; eachPlayer(p => { const d = dist2d(p.x, p.z, s.x, s.z); if (d < bd) { bd = d; tgt = p; } });
+    if (!tgt) return;
+    s.tid = tgt.id; s.idx = nearestCrumb(trails[tgt.id] || [], s.x, s.z);
+  }
+  const t = trails[s.tid] || [];
+  const mult = [1, 1.08, 1.18][gameMode], behind = t.length - s.idx;
+  let step = 8.3 * mult * (behind > 70 ? 1.3 : 1) * dt, guard = 0;
+  while (step > 0 && guard++ < 6) {
+    const gx = s.idx < t.length ? t[s.idx].x : tgt.x, gz = s.idx < t.length ? t[s.idx].z : tgt.z;
+    const dx = gx - s.x, dz = gz - s.z, d = Math.hypot(dx, dz);
+    if (d > 0.05) { let diff = Math.atan2(-dx, -dz) - s.rot; diff = Math.atan2(Math.sin(diff), Math.cos(diff)); s.rot += diff * Math.min(1, dt * 10); }
+    if (d <= step) { s.x = gx; s.z = gz; step -= d; if (s.idx < t.length) s.idx++; else break; }
+    else { s.x += dx / d * step; s.z += dz / d * step; step = 0; }
+  }
+  s.y = floorY(s.x, s.z);
+}
 function simWall(s, dt) {
   s.anim += dt; s.pause = Math.max(0, s.pause - dt);
   if (s.pause > 0) return;
   /* the Wall never walks through anybody: it stops against the first player in its way */
   let blocked = false;
   const lx = s.x + s.dir[0] * 0.6, lz = s.z + s.dir[1] * 0.6;
-  eachPlayer(p => { if (Math.abs(p.x - lx) < 2.45 && Math.abs(p.z - lz) < 2.45 && p.py < floorY(s.x, s.z) + WALL_H) blocked = true; });
+  eachPlayer(p => { if (Math.abs(p.x - lx) < 2.45 && Math.abs(p.z - lz) < 2.45 && p.py < floorY(s.x, s.z) + WALL_BH) blocked = true; });
   if (blocked) return;
   const sp = Math.min(2.8, 1.7 + 0.05 * (level - 1)) * [1, 1.25, 1.5][gameMode];
   gridMove(s, dt, sp, pickChase);
@@ -1505,24 +1621,26 @@ function simAmbusher(s, dt) {
   }
 }
 function updateSpecials(dt) {
+  if (specials.some(s => s.kind === 'stalker')) recordTrails();
   for (const s of specials) {
     if (s.flashT > 0) { s.flashT -= dt; if (s.flashT <= 0) flashSpecial(s, false); }
-    if (freezeT <= 0 || s.st === (s.kind === 'ambusher' ? AM.DEAD : CH.DEAD)) {
-      if (s.kind === 'wall') simWall(s, dt); else if (s.kind === 'charger') simCharger(s, dt); else simAmbusher(s, dt);
+    if (freezeT <= 0 || isDead(s)) {
+      if (s.kind === 'wall') simWall(s, dt); else if (s.kind === 'charger') simCharger(s, dt); else if (s.kind === 'stalker') simStalker(s, dt); else simAmbusher(s, dt);
     }
     animSpecial(s, dt);
   }
 }
-function isDead(s) { return (s.kind === 'charger' && s.st === CH.DEAD) || (s.kind === 'ambusher' && s.st === AM.DEAD); }
+function isDead(s) { return (s.kind === 'charger' && s.st === CH.DEAD) || (s.kind === 'ambusher' && s.st === AM.DEAD) || (s.kind === 'stalker' && s.st === SK.DEAD); }
 
 /* contact damage for the local player and (as host) for every remote player */
 function touchDamage(s, x, z, pyy) {
   if (isDead(s)) return 0;
-  if (s.kind === 'wall') return Math.abs(x - s.x) < 2.6 && Math.abs(z - s.z) < 2.6 && pyy < floorY(s.x, s.z) + WALL_H ? 35 : 0;
+  if (s.kind === 'wall') return Math.abs(x - s.x) < 2.6 && Math.abs(z - s.z) < 2.6 && pyy < floorY(s.x, s.z) + WALL_BH ? 35 : 0;
   if (s.kind === 'charger') {
     if (s.st > CH.CHARGE) return 0;
     return dist2d(x, z, s.x, s.z) < 1.7 && Math.abs(pyy - floorY(s.x, s.z)) < 1.3 ? (s.st === CH.CHARGE ? 40 : 15) : 0;
   }
+  if (s.kind === 'stalker') return s.st === SK.STALK && s.stT > 1.2 && dist2d(x, z, s.x, s.z) < 1.5 && Math.abs(pyy - floorY(s.x, s.z)) < 1.3 ? 999 : 0;
   if (s.st === AM.GROUND && s.biteCd <= 0) return dist2d(x, z, s.x, s.z) < 1.6 && Math.abs(pyy - s.y) < 1.5 ? 20 : 0;
   return 0;
 }
@@ -1532,7 +1650,7 @@ function specialsContact(dt) {
     eachPlayer(p => {
       const n = touchDamage(s, p.x, p.z, p.py);
       if (!n) return;
-      if (p.self) { if (invuln > 0) return; takeDamage(n, -1); }
+      if (p.self) { if (invuln > 0) return; if (n >= 900) { noise(0.25, 0.2); tone(160, 0.12, 'square', 0.2, -120); toast('NECK SNAPPED', '#ff3b4e'); } takeDamage(n, -1); }
       else { if (p.p.inv > 0) return; netToPeer(p.id, { t: 'dmg', n, by: -1 }); p.p.inv = 1.2; }
       if (s.kind === 'wall') s.pause = 1.2;
       if (s.kind === 'ambusher') s.biteCd = 9;
@@ -1556,12 +1674,17 @@ function rayBoxT(minx, miny, minz, maxx, maxy, maxz, reach) {
 function specialRay(s, reach, radius) {
   if (isDead(s)) return null;
   if (s.kind === 'wall') {
-    const fy = floorY(s.x, s.z), t = rayBoxT(s.x - 1.8, fy, s.z - 1.8, s.x + 1.8, fy + WALL_H + 0.4, s.z + 1.8, reach);
+    const fy = floorY(s.x, s.z), t = rayBoxT(s.x - 1.8, fy, s.z - 1.8, s.x + 1.8, fy + WALL_BH, s.z + 1.8, reach);
     return t == null ? null : { t, zone: 'body' };
   }
   if (s.kind === 'charger') {
     const h = rayCyl(s.x, s.z, floorY(s.x, s.z), 3.2, radius + 0.25, reach); if (!h) return null;
     return { t: h.t, zone: h.rel > 2.3 ? 'head' : 'body' };
+  }
+  if (s.kind === 'stalker') {
+    if (s.st !== SK.STALK || s.stT < 1.2) return null;
+    const h = rayCyl(s.x, s.z, floorY(s.x, s.z), 2.6, radius, reach); if (!h) return null;
+    return { t: h.t, zone: h.rel > 1.9 ? 'head' : 'body' };
   }
   const h = rayCyl(s.x, s.z, s.y, 1.5, 0.8, reach); if (!h) return null;
   return { t: h.t, zone: h.rel > 0.95 ? 'head' : 'body' };
@@ -1569,7 +1692,7 @@ function specialRay(s, reach, radius) {
 function hitSpecial(s, w, zone, tHit) {
   el.cross.classList.add('hit'); setTimeout(() => el.cross.classList.remove('hit'), 90);
   const px2 = _o.x + _d.x * tHit, py2 = _o.y + _d.y * tHit, pz2 = _o.z + _d.z * tHit;
-  const vulnerable = s.kind === 'ambusher' || (s.kind === 'charger' && s.st === CH.SPLAT);
+  const vulnerable = s.kind === 'ambusher' || s.kind === 'stalker' || (s.kind === 'charger' && s.st === CH.SPLAT);
   if (!vulnerable) { burst(px2, py2, pz2, 0xdfe6ff, 4, 4); tone(s.kind === 'wall' ? 110 : 1500, 0.05, s.kind === 'wall' ? 'square' : 'triangle', 0.04); return; }
   if (zone === 'head') { el.cross.classList.add('head'); setTimeout(() => el.cross.classList.remove('head'), 160); tone(900, 0.07, 'square', 0.05); }
   if (net.role === 'client') {
@@ -1583,6 +1706,7 @@ function applySpecialHit(s, dmg, by, zone) {
   if (isDead(s)) return;
   if (s.kind === 'wall') return;
   if (s.kind === 'charger' && s.st !== CH.SPLAT) return;
+  if (s.kind === 'stalker' && (s.st !== SK.STALK || s.stT < 1.2)) return;
   const d = zone === 'head' ? dmg * 2.5 : dmg;
   s.hp -= d; s.flashT = 0.1; flashSpecial(s, true);
   s.fill.scale.x = Math.max(0.001, s.hp / s.maxHp);
@@ -1590,9 +1714,9 @@ function applySpecialHit(s, dmg, by, zone) {
   if (s.hp <= 0) killSpecial(s, by); else if (by === net.myId) tone(180, 0.06, 'square', 0.04);
 }
 function killSpecial(s, by) {
-  setSpState(s, s.kind === 'charger' ? CH.DEAD : AM.DEAD);
+  setSpState(s, s.kind === 'charger' ? CH.DEAD : s.kind === 'stalker' ? SK.DEAD : AM.DEAD);
   if (s.bar) s.bar.visible = false;
-  const pts = (s.kind === 'charger' ? 600 : 250) * level;
+  const pts = (s.kind === 'charger' ? 600 : s.kind === 'stalker' ? 500 : 250) * level;
   if (by === net.myId) { score += pts; toast('+' + pts + ' ' + SP_NAMES[s.kind], '#ffd84a'); } else if (by >= 0) netToPeer(by, { t: 'pts', n: pts });
 }
 
@@ -1612,6 +1736,9 @@ function specFx(s, old, st) {
       noise(0.4, volAt(s.x, s.z, 0.14)); burst(s.x, fy + 1.5, s.z, 0x2f6bff, 20, 7); burst(s.x, fy + 1.5, s.z, 0x8fae86, 10, 5);
       spawnChunk(s.x, fy + 3.0, s.z, headGeo, gibMatFor(0xffc21a), 7, 6);
     }
+  } else if (s.kind === 'stalker') {
+    if (st === SK.STALK) { tone(60, 0.9, 'sawtooth', volAt(s.x, s.z, 0.06), -20); burst(s.x, fy + 0.2, s.z, 0x6b5a3a, 10, 4); }
+    else if (st === SK.DEAD) { burst(s.x, fy + 1.2, s.z, 0x7a0714, 14, 5); noise(0.2, volAt(s.x, s.z, 0.1)); }
   } else if (s.kind === 'ambusher') {
     if (st === AM.LEAP) { tone(1400, 0.3, 'sawtooth', volAt(s.x, s.z, 0.09), -950); noise(0.15, volAt(s.x, s.z, 0.08)); }
     else if (st === AM.GROUND) { shakeAt(s.x, s.z, 0.14); burst(s.x, s.y + 0.2, s.z, 0x3a2a4a, 8, 4); tone(120, 0.12, 'square', volAt(s.x, s.z, 0.1), -50); }
@@ -1621,7 +1748,7 @@ function specFx(s, old, st) {
 
 /* ---------- animation (host and clients) ---------- */
 function animSpecial(s, dt) {
-  if (s.kind === 'wall') animWall(s, dt); else if (s.kind === 'charger') animCharger(s, dt); else animAmbusher(s, dt);
+  if (s.kind === 'wall') animWall(s, dt); else if (s.kind === 'charger') animCharger(s, dt); else if (s.kind === 'stalker') animStalker(s, dt); else animAmbusher(s, dt);
   if (s.bar && s.bar.visible) s.bar.rotation.y = Math.atan2(px - s.x, pz - s.z) - s.rot;
 }
 function animWall(s, dt) {
@@ -1700,6 +1827,40 @@ function animCharger(s, dt) {
       s.stars.visible = t < 2; s.stars.rotation.y = t * 5;
       if (t > 2.6) m.visible = false;
     }
+  }
+}
+function animStalker(s, dt) {
+  const m = s.mesh, t = s.stT, L = s.legs, A = s.arms, fy = floorY(s.x, s.z);
+  m.visible = s.st === SK.STALK || (s.st === SK.DEAD && t < 1.8);
+  if (!m.visible) return;
+  m.rotation.set(0, s.rot, 0); s.up.rotation.set(0, 0, 0); s.head.rotation.set(0, 0, 0);
+  s.bar.visible = s.hp < s.maxHp && s.st === SK.STALK && t > 1.2;
+  if (s.st === SK.DEAD) {
+    const k = clampS(t / 0.5);
+    m.position.set(s.x, fy - Math.max(0, t - 1.2) * 1.5, s.z); m.rotation.x = -1.45 * k;
+    L[0].rotation.x = 0.3; L[1].rotation.x = -0.2; A[0].rotation.x = 2.4; A[1].rotation.x = 2.0;
+    return;
+  }
+  if (t < 1.2) {
+    const k = t / 1.2, e = k * k * (3 - 2 * k);
+    m.position.set(s.x, fy - 3.0 * (1 - e), s.z);
+    A[0].rotation.x = 3.0 - 1.2 * e; A[1].rotation.x = 3.0 - 1.2 * e;
+    s.dustT -= dt; if (s.dustT <= 0) { s.dustT = 0.12; burst(s.x + (Math.random() - 0.5), fy + 0.1, s.z + (Math.random() - 0.5), 0x6b5a3a, 3, 3); }
+    return;
+  }
+  const w = s.anim * 10, sw = Math.sin(w);
+  m.position.set(s.x, fy + Math.abs(sw) * 0.05, s.z);
+  m.rotation.x = -0.28; s.up.rotation.x = -0.12;
+  L[0].rotation.x = sw * 0.8; L[1].rotation.x = -sw * 0.8;
+  A[0].rotation.x = -sw * 0.25 + 0.15; A[1].rotation.x = sw * 0.25 + 0.15; A[0].rotation.z = 0.08; A[1].rotation.z = -0.08;
+  let nd = 1e9, nx = px, nz = pz;
+  eachPlayerAny(p => { const d = dist2d(p.x, p.z, s.x, s.z); if (d < nd) { nd = d; nx = p.x; nz = p.z; } });
+  const bear = Math.atan2(-(nx - s.x), -(nz - s.z)) - s.rot; s.head.rotation.y = Math.max(-1.2, Math.min(1.2, Math.atan2(Math.sin(bear), Math.cos(bear)))); s.head.rotation.x = 0.2;
+  const sidx = Math.floor(w / Math.PI);
+  if (sidx !== s.lastStep) {
+    s.lastStep = sidx;
+    const d = dist2d(s.x, s.z, px, pz);
+    if (d < 34 && d > 0.5) footstep(0.012 + 0.07 * (1 - d / 34), 0.78);
   }
 }
 function animAmbusher(s, dt) {
@@ -1875,7 +2036,7 @@ function netTick(dt) {
   net.t += dt;
   if (net.role === 'host' && net.t >= 1 / 15) {
     net.t = 0;
-    netBroadcast({ t: 'snap', z: zombies.map(z => [r2(z.x), r2(z.z), r2(z.rot), z.state, r2(z.hp), z.maxHp, z.mode === 'walk' ? 0 : z.mode === 'fall' ? 1 : 2, (z.lost[0] ? 1 : 0) | (z.lost[1] ? 2 : 0) | (z.lost[2] ? 4 : 0) | (z.lost[3] ? 8 : 0)]), p: allP(), sp: specSnap() });
+    netBroadcast({ t: 'snap', z: zombies.map(z => [r2(z.x), r2(z.z), r2(z.rot), z.state, r2(z.hp), z.maxHp, z.mode === 'walk' ? 0 : z.mode === 'fall' ? 1 : 2, (z.lost[0] ? 1 : 0) | (z.lost[1] ? 2 : 0) | (z.lost[2] ? 4 : 0) | (z.lost[3] ? 8 : 0), z.state === 'house' ? r2(z.timer) : 0]), p: allP(), sp: specSnap(), lv: level, sd: seed, gm: gameMode, mh: mapHash });
   } else if (net.role === 'client' && net.t >= 1 / 20) {
     net.t = 0; netSend({ t: 'st', a: myP() });
   }
@@ -1888,7 +2049,7 @@ function hostContact(dt) {
     if (!p.a || p.inv > 0 || !p.seen || freezeT > 0) continue;
     for (const z of zombies) {
       if ((z.state === 'active' || z.state === 'leaving') && z.mode !== 'fall' && Math.hypot(z.x - p.x, z.z - p.z) < 1.5 && Math.abs((p.py || 0) - floorY(z.x, z.z)) < 1.0) {
-        netToPeer(+id, { t: 'hurt' }); p.inv = 1.5; placeZombie(z, z.i, 2); break;
+        netToPeer(+id, { t: 'hurt' }); p.inv = 1.4; break;
       }
     }
   }
@@ -1908,7 +2069,7 @@ function hostStart() {
 }
 function mpNext() {
   for (const id in net.players) { net.players[id].inv = 3; net.players[id].a = true; }
-  netBroadcast({ t: 'next' });
+  netBroadcast({ t: 'next', lv: level + 1, sd: seed });
   nextLevel();
 }
 function onHostData(id, m) {
@@ -1974,7 +2135,8 @@ function puppetZombie(z, dt) {
     z.deadT += dt; animDeath(z);
     return;
   }
-  const k = Math.min(1, dt * 12), pen = z.state === 'house';
+  if (z.state === 'house') { z.timer -= dt; z.anim += dt * 2; riseAnim(z); return; }
+  const k = Math.min(1, dt * 12), pen = false;
   z.x += (z.tx - z.x) * k; z.z += (z.tz - z.z) * k;
   let d = z.trot - z.rot; d = Math.atan2(Math.sin(d), Math.cos(d)); z.rot += d * k;
   m.rotation.y = z.rot; m.position.set(z.x, pen ? Math.sin(z.anim * 2) * 0.05 : floorY(z.x, z.z), z.z);
@@ -1982,7 +2144,20 @@ function puppetZombie(z, dt) {
   z.bar.visible = z.hp < z.maxHp && !pen;
   if (z.bar.visible) z.bar.rotation.y = Math.atan2(px - z.x, pz - z.z) - z.rot;
 }
+/* the host's map is the truth: if this client built something different, rebuild from the host's seed and level */
+function checkSync(m) {
+  if (m.lv == null || state === 'title') return;
+  net.rsT = Math.max(0, (net.rsT || 0) - 1 / 15);
+  const off = (m.gm | 0) !== gameMode || m.lv !== level || m.sd !== seed;
+  if (off || (m.mh !== mapHash && net.rsT <= 0)) {
+    gameMode = m.gm | 0; seed = m.sd | 0; level = m.lv;
+    buildLevel(level); drawMapBase(); refreshDots(); resetActors();
+    net.rsT = 4;
+    if (m.mh !== mapHash) toast('MAP DOES NOT MATCH THE HOST. HARD REFRESH THE PAGE', '#ff3b4e'); else toast('RESYNCED TO THE HOST MAP', '#46e6ff');
+  }
+}
 function applySnap(m) {
+  checkSync(m);
   applySpecialSnap(m.sp);
   m.z.forEach((a, i) => {
     const z = zombies[i], prev = z.state, ns = a[3];
@@ -1995,6 +2170,7 @@ function applySnap(m) {
     }
     if (ns !== 'dead' && prev === 'dead') { resetLimbs(z); z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.y = 0; z.x = z.tx; z.z = z.tz; }
     if (!z.nseen) { z.x = z.tx; z.z = z.tz; z.rot = z.trot; z.nseen = true; }
+    if (ns === 'house') { z.timer = a[8] || 0; if (prev !== 'house') { z.x = z.tx; z.z = z.tz; z.rot = z.trot; z.dirtK = -1; resetLimbs(z); } }
     z.state = ns;
     const nm = a[6] === 1 ? 'fall' : a[6] === 2 ? 'crawl' : 'walk', mask = a[7] | 0;
     if (mask === 0 && z.lost.some(Boolean)) resetLimbs(z);
@@ -2025,7 +2201,7 @@ function onClientData(m) {
     case 'dmg': takeDamage(m.n, m.by); break;
     case 'pause': clientPause(!!m.on); break;
     case 'clear': score += m.bonus; showClear(m.bonus); break;
-    case 'next': nextLevel(); break;
+    case 'next': if (m.sd != null) seed = m.sd | 0; if (m.lv != null) level = (m.lv | 0) - 1; nextLevel(); break;
     case 'over': net.phase = 'over'; showMpOver(m.res); break;
   }
 }
@@ -2046,7 +2222,6 @@ function takeDamage(n, by, z) {
   el.hurt.classList.add('on'); setTimeout(() => el.hurt.classList.remove('on'), 120);
   tone(140, 0.12, 'sawtooth', 0.07, -60);
   if (by === -1) invuln = 1.2;
-  if (z) placeZombie(z, z.i, 2);
   if (hp <= 0) { if (net.role) die(by); else hurt(z); }
 }
 function die(by) {
@@ -2261,10 +2436,12 @@ function drawMap() {
   }
   for (const id in net.players) {
     const p = net.players[id]; if (!p.seen || !p.a) continue;
-    mg.fillStyle = PCSS[p.id]; mg.beginPath(); mg.arc(p.x / CS * MS, p.z / CS * MS, 3.2 * MK + 0.4, 0, 6.283); mg.fill();
+    mg.save(); mg.translate(p.x / CS * MS, p.z / CS * MS); mg.rotate(-(p.yaw || 0)); const q2 = 0.8 + 0.8 * MK;
+    mg.fillStyle = PCSS[p.id]; mg.beginPath(); mg.moveTo(0, -4.5 * q2); mg.lineTo(3.4 * q2, 3.4 * q2); mg.lineTo(-3.4 * q2, 3.4 * q2); mg.closePath(); mg.fill();
+    mg.strokeStyle = '#05060f'; mg.lineWidth = 1; mg.stroke(); mg.restore();
   }
   mg.save(); mg.translate(px / CS * MS, pz / CS * MS); mg.rotate(-yaw);
-  mg.fillStyle = '#ffffff'; mg.beginPath(); const q = 0.8 + 0.2 * MK * 4; mg.moveTo(0, -4.5 * q); mg.lineTo(3.4 * q, 3.4 * q); mg.lineTo(-3.4 * q, 3.4 * q); mg.closePath(); mg.fill();
+  mg.fillStyle = net.role ? PCSS[net.myId] : '#ffffff'; mg.strokeStyle = '#ffffff'; mg.lineWidth = 1.5; mg.beginPath(); const q = 0.8 + 0.2 * MK * 4; mg.moveTo(0, -4.5 * q); mg.lineTo(3.4 * q, 3.4 * q); mg.lineTo(-3.4 * q, 3.4 * q); mg.closePath(); mg.fill(); mg.stroke();
   mg.restore();
 }
 
@@ -2295,7 +2472,7 @@ function refreshDots() {
 }
 function resetActors() {
   placeSelf();
-  zombies.forEach((z, i) => placeZombie(z, i, [0.8, 2.5, 4.5, 6.5][i]));
+  zombies.forEach((z, i) => placeZombie(z, i, [2.2, 3.6, 5.4, 7.2][i]));
   resetSpecials();
   scatter = true; modeT = 0;
 }
@@ -2350,7 +2527,6 @@ function hurt(z) {
   lives--; invuln = 3; updateLives(); const lost = loseGun();
   el.hurt.classList.add('on'); setTimeout(() => el.hurt.classList.remove('on'), 120);
   tone(110, 0.4, 'sawtooth', 0.12, -60); noise(0.2, 0.1);
-  if (z && net.role) placeZombie(z, z.i, 2);
   if (lives <= 0) {
     if (!net.role) { gameOver(); return; }
     ghost = true; toast('YOU ARE DOWN. TEAM FIGHTS ON', '#ff3b4e');

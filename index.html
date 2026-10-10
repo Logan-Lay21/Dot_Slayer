@@ -174,7 +174,7 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.9.1';
+const VERSION = '0.9.2';
 let playerCount = 1;
 const MAXE = 8, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;
@@ -935,7 +935,43 @@ function blockedFor(z, c, r) {
   return z.state === 'active' && isPen(c, r);
 }
 const DIRS = [[0, -1], [-1, 0], [0, 1], [1, 0]];
+/* the Wall fills its hall cell and the one it is walking into: zombies treat those as solid and route around */
+function wallCell(c, r) {
+  for (const w of specials) {
+    if (w.kind !== 'wall') continue;
+    if ((c === w.c && r === w.r) || (c === w.nc && r === w.nr) || (c === Math.floor(w.x / CS) && r === Math.floor(w.z / CS))) return true;
+  }
+  return false;
+}
+function wallNear(z) {
+  for (const w of specials) if (w.kind === 'wall' && Math.abs(w.c - z.c) + Math.abs(w.r - z.r) <= 12) return true;
+  return false;
+}
+/* flood outward from the zombie around the Wall, then head for the reachable cell closest to its target */
+function wallRoute(z) {
+  const first = new Map(), dist = new Map(), key = (c, r) => r * COLS + c, q = [];
+  const k0 = key(z.c, z.r); first.set(k0, null); dist.set(k0, 0); q.push([z.c, z.r]);
+  let best = null, bd = 1e9, bl = 1e9;
+  for (let h = 0; h < q.length; h++) {
+    const [c, r] = q[h], f = first.get(key(c, r)), dl = dist.get(key(c, r));
+    if (f) {
+      const dd = (c - z.tc) * (c - z.tc) + (r - z.tr) * (r - z.tr);
+      if (dd < bd || (dd === bd && dl < bl)) { bd = dd; bl = dl; best = f; }
+    }
+    for (const d of DIRS) {
+      const nc = c + d[0], nr = r + d[1], k = key(nc, nr);
+      if (first.has(k) || blockedFor(z, nc, nr) || wallCell(nc, nr)) continue;
+      first.set(k, f || d); dist.set(k, dl + 1); q.push([nc, nr]);
+    }
+  }
+  return best;
+}
 function chooseNext(z) {
+  if (z.state === 'active' && wallNear(z)) {
+    const b = wallRoute(z);
+    if (b) { z.dir = b; z.nc = z.c + b[0]; z.nr = z.r + b[1]; return; }
+    z.dir = [0, 0]; z.nc = z.c; z.nr = z.r; return; /* boxed in by the Wall: wait */
+  }
   let best = null, bd = 1e9;
   const still = z.dir[0] === 0 && z.dir[1] === 0;
   for (const d of DIRS) {
@@ -975,6 +1011,7 @@ function updateZombie(z, dt) {
   }
   const sp = zSpeed() * (z.slow > 0 ? 0.4 : 1) * (z.mode === 'crawl' ? crawlMul(z) : 1);
   z.slow = Math.max(0, z.slow - dt);
+  if ((z.nc !== z.c || z.nr !== z.r) && wallCell(z.nc, z.nr) && !wallCell(z.c, z.r)) { z.dir = [-z.dir[0], -z.dir[1]]; z.nc = z.c; z.nr = z.r; }
   let step = sp * dt, guard = 0;
   while (step > 0 && guard++ < 4) {
     const tx = (z.nc + 0.5) * CS, tz = (z.nr + 0.5) * CS, dx = tx - z.x, dz = tz - z.z, d = Math.hypot(dx, dz);

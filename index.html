@@ -37,8 +37,10 @@ button{font-family:inherit}
 .snd{position:absolute;top:14px;left:50%;transform:translateX(-50%);pointer-events:auto;font-size:10px;letter-spacing:.14em;font-weight:700;color:var(--dim);background:rgba(8,11,36,.8);border:1px solid var(--line);border-radius:999px;padding:6px 10px;cursor:pointer}
 .tr{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 #map{width:min(150px,34vw);height:auto;border:1px solid var(--line);border-radius:6px;background:rgba(5,6,15,.72)}
-#ver{position:fixed;left:8px;bottom:4px;z-index:5;font:700 10px/1 var(--body,sans-serif);letter-spacing:.12em;color:var(--dim);opacity:.7;pointer-events:none}
-#ver.home{z-index:60;left:auto;right:14px;top:12px;bottom:auto;font-size:13px;opacity:.9}
+#ver{position:fixed;right:16px;top:3px;z-index:5;font:700 10px/1 var(--body,sans-serif);letter-spacing:.12em;color:var(--dim);opacity:.7;pointer-events:none}
+#ver.home{z-index:60;right:14px;top:12px;font-size:13px;opacity:.9}
+#devsw{display:none;position:fixed;left:0;top:0;width:64px;height:64px;z-index:80;background:transparent;border:0;padding:0;opacity:0;cursor:default;-webkit-tap-highlight-color:transparent}
+#ver.home ~ #devsw{display:block}
 .gp p{margin:0 0 10px;font-weight:500}.gp .rules{margin-bottom:10px}.gtag{margin-bottom:8px}.gtag .sw{width:22px;height:22px;display:inline-block}
 .gnav{display:flex;gap:10px;justify-content:space-between;padding-top:6px}.gnav .btn[disabled]{opacity:.35;cursor:default}
 #lives{display:flex;gap:6px}
@@ -124,7 +126,7 @@ button{font-family:inherit}
       <div id="board"></div>
     </div>
     <button id="snd" class="snd" type="button" aria-label="Toggle sound">SOUND ON</button>
-    <div id="ver"></div>
+    <div id="ver"></div><button id="devsw" type="button" tabindex="-1" aria-hidden="true"></button>
     <div class="tr"><canvas id="map" width="152" height="168"></canvas><div id="lives" aria-label="Lives left"></div></div>
     <div id="cross"></div>
     <div id="toast" role="status"></div>
@@ -174,7 +176,7 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.9.3';
+const VERSION = '0.9.4';
 let playerCount = 1;
 const MAXE = 8, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;
@@ -1336,6 +1338,9 @@ function pitHit(pit) {
 }
 
 /* a fresh map plus fresh pits for a level */
+let devOn = false;
+try { devOn = localStorage.getItem('dsDev') === '1'; } catch (e) { devOn = false; }
+const nextMode = () => { const n = (gameMode + 1) % 4; return n === 3 && !devOn ? 0 : n; };
 const modeLabel = () => 'MODE: ' + ['NORMAL', 'FAST ZOMBS', 'INSANE', 'DEV MODE'][gameMode];
 let mapHash = 0;
 function computeMapHash() {
@@ -2530,7 +2535,7 @@ function mpHtml() {
 function bindPanel() {
   const l = $('leavebtn'); if (l) l.onclick = leaveRoom;
   const gb = $('guidebtn'); if (gb) gb.onclick = () => showGuide(0);
-  const fb = $('fastbtn'); if (fb) fb.onclick = () => { gameMode = (gameMode + 1) % 4; fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); };
+  const fb = $('fastbtn'); if (fb) fb.onclick = () => { gameMode = nextMode(); fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); };
   const pv = $('pvpbtn'); if (pv) pv.onclick = () => { net.pvp = !net.pvp; broadcastLobby(); };
   const h = $('hostbtn'); if (h) h.onclick = () => { audioInit(); hostRoom(0); };
   const j = $('joinbtn'), c = $('code');
@@ -2936,6 +2941,12 @@ function frame(now) {
 /* ---------- boot ---------- */
 try { best = +localStorage.getItem('dotslayer-best') || 0; } catch (e) {}
 window.addEventListener('touchstart', () => {}, { passive: true });
+$('devsw').onclick = () => {
+  devOn = !devOn;
+  try { localStorage.setItem('dsDev', devOn ? '1' : '0'); } catch (e) { /* private mode */ }
+  if (!devOn && gameMode === 3) { gameMode = 0; const fb = $('fastbtn'); if (fb) fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); }
+  toast(devOn ? 'DEV MODE UNLOCKED' : 'DEV MODE HIDDEN', devOn ? '#46e6ff' : '#9aa0b8');
+};
 $('ver').textContent = 'v' + VERSION; buildChips(); updateLives(); buildGun(0); refreshChips(); drawMapBase(); resetActors(); resize(); showTitle();
 requestAnimationFrame(frame);
 

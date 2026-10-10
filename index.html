@@ -52,6 +52,7 @@ button{font-family:inherit}
 #cross{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border:2px solid rgba(255,255,255,.8);border-radius:50%;transition:transform .08s,border-color .08s}
 #cross::after{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;background:var(--dot);border-radius:50%}
 #cross.hit{border-color:var(--blood);transform:scale(1.5)}
+#cross.head{border-color:var(--dot);transform:scale(2)}
 #toast{position:absolute;left:50%;top:24%;transform:translateX(-50%);font:400 clamp(18px,5vw,26px)/1.1 var(--display);text-align:center;opacity:0;white-space:nowrap;text-shadow:0 2px 0 #000}
 #toast.show{animation:pop 1.9s ease-out}
 @keyframes pop{0%{opacity:0;transform:translate(-50%,10px) scale(.92)}12%{opacity:1;transform:translate(-50%,0) scale(1)}78%{opacity:1}100%{opacity:0}}
@@ -168,7 +169,7 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, CS = 4, WALL_H = 3.4, EYE = 1.65, RAMP_H = 1.3;
+const ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, CS = 4, WALL_H = 4.2, EYE = 2.05, RAMP_H = 1.3;
 const walls = [], dotAt = [], SPAWNS = [], dotList = [], grid = [], hgt = [], rampRuns = [];
 let playerStart = { c: 9, r: 15 };
 for (let r = 0; r < ROWS; r++) { walls.push(new Array(COLS).fill(true)); dotAt.push(new Array(COLS).fill(null)); hgt.push(new Array(COLS).fill(null)); grid.push(new Array(COLS).fill('#')); }
@@ -617,23 +618,29 @@ function makeZombie(def, i) {
   const cloth = new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.8, flatShading: true, emissive: def.color, emissiveIntensity: 0.35 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x16182e, roughness: 0.9, flatShading: true });
   const eye = new THREE.MeshBasicMaterial({ color: def.color });
+  const gore = new THREE.MeshStandardMaterial({ color: 0x7a0714, roughness: 0.6, flatShading: true, emissive: 0x4a0008, emissiveIntensity: 0.6 });
   const part = (w, h, d, mat, x, y, z, parent) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(x, y, z); (parent || g).add(m); return m;
   };
-  const legs = [-1, 1].map(s => { const p = new THREE.Group(); p.position.set(s * 0.2, 0.95, 0); g.add(p); part(0.32, 0.95, 0.32, dark, 0, -0.475, 0, p); return p; });
-  part(0.85, 0.95, 0.45, cloth, 0, 1.45, 0);
-  part(0.56, 0.56, 0.56, skin, 0, 2.2, 0);
-  part(0.13, 0.1, 0.05, eye, -0.14, 2.26, -0.29); part(0.13, 0.1, 0.05, eye, 0.14, 2.26, -0.29);
-  part(0.3, 0.07, 0.05, dark, 0, 2.08, -0.29);
-  const arms = [-1, 1].map(s => { const p = new THREE.Group(); p.position.set(s * 0.58, 1.85, 0); p.rotation.x = Math.PI / 2; g.add(p); part(0.24, 0.85, 0.24, skin, 0, -0.42, 0, p); return p; });
+  const piv = (x, y, z, parent) => { const p = new THREE.Group(); p.position.set(x, y, z); (parent || g).add(p); return p; };
+  const legs = [-1, 1].map(s => { const p = piv(s * 0.2, 0.95, 0); part(0.32, 0.95, 0.32, dark, 0, -0.475, 0, p); return p; });
+  const legStumps = [-1, 1].map(s => { const m = part(0.3, 0.3, 0.3, gore, s * 0.2, 0.85, 0); m.visible = false; return m; });
+  const up = piv(0, 0.95, 0);
+  part(0.85, 0.95, 0.45, cloth, 0, 0.5, 0, up);
+  const head = piv(0, 0.98, 0, up);
+  part(0.56, 0.56, 0.56, skin, 0, 0.28, 0, head);
+  part(0.13, 0.1, 0.05, eye, -0.14, 0.34, -0.29, head); part(0.13, 0.1, 0.05, eye, 0.14, 0.34, -0.29, head);
+  part(0.3, 0.07, 0.05, dark, 0, 0.16, -0.29, head);
+  const arms = [-1, 1].map(s => { const p = piv(s * 0.58, 0.9, 0, up); p.rotation.x = Math.PI / 2; part(0.24, 0.85, 0.24, skin, 0, -0.42, 0, p); return p; });
+  const armStumps = [-1, 1].map(s => { const m = part(0.26, 0.26, 0.26, gore, s * 0.58, 0.85, 0, up); m.visible = false; return m; });
   const bar = new THREE.Group(); bar.position.y = 3.0; g.add(bar);
   bar.add(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.14), new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.7 })));
   const fg = new THREE.PlaneGeometry(1.2, 0.14); fg.translate(0.6, 0, 0);
   const fill = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: def.color, side: THREE.DoubleSide }));
   fill.position.set(-0.6, 0, 0.01); bar.add(fill);
   scene.add(g);
-  return { i, def, mesh: g, legs, arms, skin, cloth, bar, fill, hp: 3, maxHp: 3, state: 'house', x: 0, z: 0, c: 0, r: 0, nc: 0, nr: 0, dir: [0, 0], tc: 0, tr: 0, timer: 0, slow: 0, flashT: 0, anim: Math.random() * 6, deadT: 0, respawn: 0, rot: 0 };
+  return { i, def, mesh: g, legs, arms, up, head, legStumps, armStumps, skin, cloth, bar, fill, hp: 3, maxHp: 3, state: 'house', mode: 'walk', modeT: 0, lost: [false, false, false, false], limbHp: [2, 2, 2, 2], x: 0, z: 0, c: 0, r: 0, nc: 0, nr: 0, dir: [0, 0], tc: 0, tr: 0, timer: 0, slow: 0, flashT: 0, anim: Math.random() * 6, deadT: 0, respawn: 0, rot: 0 };
 }
 const zombies = ZDEF.map(makeZombie);
 
@@ -642,16 +649,88 @@ function setFlash(z, on) {
   z.cloth.emissiveIntensity = on ? 1 : 0.35;
   z.skin.emissiveIntensity = on ? 0.9 : 0;
 }
+/* ---------- dismemberment ---------- */
+function resetLimbs(z) {
+  z.lost = [false, false, false, false]; z.limbHp = [2, 2, 2, 2]; z.mode = 'walk'; z.modeT = 0;
+  z.legs.forEach(l => { l.visible = true; l.rotation.x = 0; }); z.arms.forEach(l => { l.visible = true; });
+  z.legStumps.forEach(m => { m.visible = false; }); z.armStumps.forEach(m => { m.visible = false; });
+  z.mesh.rotation.x = 0; z.mesh.rotation.z = 0; z.head.rotation.set(0, 0, 0); z.up.rotation.set(0, 0, 0);
+}
+const gibs = [], gibGeo = new THREE.BoxGeometry(0.26, 0.8, 0.26);
+const gibMats = [new THREE.MeshStandardMaterial({ color: 0x16182e, roughness: 0.9, flatShading: true }), new THREE.MeshStandardMaterial({ color: 0x8fae86, roughness: 0.9, flatShading: true })];
+function spawnGib(x, y, zz, isArm) {
+  const m = new THREE.Mesh(gibGeo, gibMats[isArm ? 1 : 0]); m.position.set(x, y, zz); scene.add(m);
+  gibs.push({ m, vx: (Math.random() - 0.5) * 7, vy: 4 + Math.random() * 4, vz: (Math.random() - 0.5) * 7, sx: (Math.random() - 0.5) * 12, sz: (Math.random() - 0.5) * 12, life: 4 });
+}
+function updateGibs(dt) {
+  for (let i = gibs.length - 1; i >= 0; i--) {
+    const g = gibs[i], m = g.m; g.life -= dt;
+    g.vy -= 20 * dt; m.position.x += g.vx * dt; m.position.y += g.vy * dt; m.position.z += g.vz * dt;
+    m.rotation.x += g.sx * dt; m.rotation.z += g.sz * dt;
+    const fy = floorY(m.position.x, m.position.z) + 0.15;
+    if (m.position.y < fy) { m.position.y = fy; g.vy = Math.abs(g.vy) > 3 ? -g.vy * 0.3 : 0; g.vx *= 0.6; g.vz *= 0.6; g.sx *= 0.5; g.sz *= 0.5; }
+    if (wallAt(m.position.x, m.position.z)) { g.vx *= -0.3; g.vz *= -0.3; }
+    if (g.life <= 0) { scene.remove(m); gibs.splice(i, 1); }
+  }
+}
+/* both the host and the clients run this when a limb comes off, so everyone sees the same gore */
+function severFx(z, idx) {
+  z.lost[idx] = true; z.limbHp[idx] = 0;
+  const leg = idx < 2, side = idx & 1 ? 1 : -1, fy = floorY(z.x, z.z);
+  (leg ? z.legStumps : z.armStumps)[idx & 1].visible = true;
+  (leg ? z.legs : z.arms)[idx & 1].visible = false;
+  const wx = z.x + side * Math.cos(z.rot) * 0.4, wz = z.z - side * Math.sin(z.rot) * 0.4, wy = fy + (leg ? 0.6 : 1.5);
+  burst(wx, wy, wz, 0xb01020, 12, 5); burst(wx, wy, wz, 0x7a0714, 6, 3);
+  spawnGib(wx, wy, wz, !leg);
+  noise(0.16, 0.1); tone(95, 0.2, 'sawtooth', 0.06, -50);
+}
+function sever(z, idx) {
+  severFx(z, idx);
+  if (idx < 2 && z.mode === 'walk') { z.mode = 'fall'; z.modeT = 0; z.slow = 0; }
+}
 function placeZombie(z, idx, delay) {
   const s = SPAWNS[idx];
   z.c = z.nc = s.c; z.r = z.nr = s.r; z.x = (s.c + 0.5) * CS; z.z = (s.r + 0.5) * CS;
-  z.dir = [0, 0]; z.state = 'house'; z.timer = delay; z.slow = 0; z.deadT = 0;
+  z.dir = [0, 0]; z.state = 'house'; z.timer = delay; z.slow = 0; z.deadT = 0; resetLimbs(z);
   z.hp = z.maxHp = 3 + (level - 1);
   z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.set(z.x, floorY(z.x, z.z), z.z);
   z.fill.scale.x = 1; z.flashT = 0; z.bar.visible = false; setFlash(z, false);
 }
+const wrapA = a => Math.atan2(Math.sin(a), Math.cos(a));
+/* Falling, lying still twitching, then crawling: jerky, head always turned to stare at you. */
+function animCrawl(z) {
+  const m = z.mesh, t = z.anim * 3, fall = z.mode === 'fall';
+  const k = fall ? Math.min(1, z.modeT / 0.4) : 1, prone = k * k * (3 - 2 * k);
+  const still = fall && z.modeT > 0.4;
+  const spasm = Math.sin(t * 13) * Math.sin(t * 4.1) > 0.82 ? 1 : 0;
+  m.rotation.x = -1.45 * prone; m.rotation.z = 0;
+  const L = 1.1 * prone;
+  m.position.x += Math.sin(m.rotation.y) * L; m.position.z += Math.cos(m.rotation.y) * L; m.position.y += 0.2 * prone;
+  for (let i = 0; i < 2; i++) {
+    z.legs[i].visible = !z.lost[i]; z.legStumps[i].visible = z.lost[i];
+    if (!z.lost[i]) z.legs[i].rotation.x = 0.25 + Math.sin(t * 0.9 + i * 2.4) * 0.18 + spasm * 0.5;
+    z.arms[i].visible = !z.lost[2 + i]; z.armStumps[i].visible = z.lost[2 + i];
+  }
+  const bear = Math.atan2(-(px - z.x), -(pz - z.z)), turn = Math.max(-1.5, Math.min(1.5, wrapA(bear - m.rotation.y)));
+  z.head.rotation.y += (turn - z.head.rotation.y) * (still ? 0.04 : 0.15);
+  z.head.rotation.x = 1.3 * prone + (still ? 0.15 * Math.sin(t * 1.3) : 0) - spasm * 0.3;
+  z.head.rotation.z = 0.35 * Math.sin(t * 0.7) + spasm * 0.5 * Math.sin(t * 60);
+  const w = Math.sin(t * 1.5), jerk = Math.sign(w) * Math.pow(Math.abs(w), 0.35);
+  if (!fall || !still) {
+    const flail = fall ? 2.4 + Math.sin(t * 9) * 0.5 : Math.PI - 0.3 + 0.75 * jerk;
+    const flail2 = fall ? 2.4 - Math.sin(t * 9) * 0.5 : Math.PI - 0.3 - 0.75 * jerk;
+    z.arms[0].rotation.x = flail; z.arms[1].rotation.x = flail2;
+  } else {
+    z.arms[0].rotation.x = Math.PI - 0.1 + spasm * 0.6 * Math.sin(t * 50); z.arms[1].rotation.x = Math.PI - 0.1 - spasm * 0.6 * Math.sin(t * 47);
+  }
+  z.arms[0].rotation.z = -0.35; z.arms[1].rotation.z = 0.35;
+  if (!still) m.position.y += Math.abs(Math.sin(t * 1.5)) * 0.07;
+  else { m.position.x += Math.sin(t * 23) * 0.012 * spasm; m.position.z += Math.cos(t * 19) * 0.012 * spasm; }
+}
 function animLimbs(z, amp) {
+  if (z.mode !== 'walk') { animCrawl(z); return; }
   const t = z.anim * 3, sw = Math.sin(t) * 0.75 * amp, m = z.mesh;
+  for (let i = 0; i < 2; i++) { z.legs[i].visible = !z.lost[i]; z.legStumps[i].visible = z.lost[i]; z.arms[i].visible = !z.lost[2 + i]; z.armStumps[i].visible = z.lost[2 + i]; }
   z.legs[0].rotation.x = sw; z.legs[1].rotation.x = -sw;
   const near = amp > 0.5 && z.state !== 'dead' && Math.hypot(z.x - px, z.z - pz) < 6;
   const reach = near ? 1.4 + Math.sin(t * 0.7) * 0.08 : Math.PI / 2 - 0.1;
@@ -660,8 +739,10 @@ function animLimbs(z, amp) {
   z.arms[1].rotation.x = reach - Math.sin(t + 1) * flail;
   z.arms[0].rotation.z = 0.12 + Math.sin(t * 0.5) * 0.06 * amp; z.arms[1].rotation.z = -z.arms[0].rotation.z;
   m.rotation.x = -(amp * 0.07 + (near ? 0.14 : 0)); m.rotation.z = Math.sin(t * 0.5) * 0.06 * amp;
+  z.head.rotation.set(0, 0, 0);
   m.position.y += Math.abs(Math.sin(t)) * 0.1 * amp;
 }
+const crawlMul = z => 0.4 + 3 * Math.max(0, Math.sin(z.anim * 3 * 1.5));
 function facingDir(ay) {
   const fx = -Math.sin(ay), fz = -Math.cos(ay);
   return Math.abs(fx) > Math.abs(fz) ? [Math.sign(fx), 0] : [0, Math.sign(fz)];
@@ -703,7 +784,7 @@ function updateZombie(z, dt) {
   if (z.flashT > 0) { z.flashT -= dt; if (z.flashT <= 0) setFlash(z, false); }
   if (z.state === 'dead') {
     z.deadT += dt;
-    m.rotation.x = Math.min(1, z.deadT / 0.45) * Math.PI / 2;
+    m.rotation.x = z.mode === 'walk' ? Math.min(1, z.deadT / 0.45) * Math.PI / 2 : -1.45;
     m.position.y = -Math.max(0, z.deadT - 0.9) * 1.2;
     z.bar.visible = false;
     if (z.deadT > 1.6) m.visible = false;
@@ -712,13 +793,22 @@ function updateZombie(z, dt) {
     return;
   }
   if (freezeT > 0 && z.state !== 'house') return;
+  if (z.mode === 'fall') {
+    z.modeT += dt; z.anim += dt * 1.5;
+    m.rotation.y = z.rot; m.position.set(z.x, floorY(z.x, z.z), z.z); animLimbs(z, 1);
+    z.bar.visible = z.hp < z.maxHp;
+    if (z.bar.visible) z.bar.rotation.y = Math.atan2(px - z.x, pz - z.z) - z.rot;
+    if (z.modeT > 1.5) { z.mode = 'crawl'; z.modeT = 0; }
+    return;
+  }
+  if (z.mode === 'crawl') z.modeT += dt;
   if (z.state === 'house') {
     z.timer -= dt; z.anim += dt * 2;
     m.position.set(z.x, Math.sin(z.anim * 2) * 0.05, z.z); animLimbs(z, 0.4);
     if (z.timer <= 0) { z.state = z.r <= 7 ? 'active' : 'leaving'; setTarget(z); chooseNext(z); }
     return;
   }
-  const sp = zSpeed() * (z.slow > 0 ? 0.4 : 1);
+  const sp = zSpeed() * (z.slow > 0 ? 0.4 : 1) * (z.mode === 'crawl' ? crawlMul(z) : 1);
   z.slow = Math.max(0, z.slow - dt);
   let step = sp * dt, guard = 0;
   while (step > 0 && guard++ < 4) {
@@ -733,7 +823,7 @@ function updateZombie(z, dt) {
   let diff = want - z.rot; diff = Math.atan2(Math.sin(diff), Math.cos(diff));
   z.rot += diff * Math.min(1, dt * 10);
   m.rotation.y = z.rot; m.position.set(z.x, floorY(z.x, z.z), z.z);
-  z.anim += dt * sp * 1.6; animLimbs(z, 1);
+  z.anim += z.mode === 'crawl' ? dt * 1.5 : dt * sp * 1.6; animLimbs(z, 1);
   z.bar.visible = z.hp < z.maxHp;
   if (z.bar.visible) z.bar.rotation.y = Math.atan2(px - z.x, pz - z.z) - z.rot;
 }
@@ -752,18 +842,27 @@ function wallDist(o, d, max) {
   }
   return max;
 }
-function hitZombie(z, w) {
+function hitZombie(z, w, zone, side) {
   el.cross.classList.add('hit'); setTimeout(() => el.cross.classList.remove('hit'), 90);
+  if (zone === 'head') { el.cross.classList.add('head'); setTimeout(() => el.cross.classList.remove('head'), 160); tone(900, 0.07, 'square', 0.05); }
   if (net.role === 'client') {
-    netSend({ t: 'hit', zi: z.i, dmg: w.dmg, stun: w.stun });
+    netSend({ t: 'hit', zi: z.i, dmg: w.dmg, stun: w.stun, zone, side });
     z.flashT = 0.1; setFlash(z, true); burst(z.x, 1.4, z.z, z.def.color, 3, 3); tone(180, 0.06, 'square', 0.04);
     return;
   }
-  applyHit(z, w.dmg, w.stun, net.myId);
+  applyHit(z, w.dmg, w.stun, net.myId, zone, side);
 }
-function applyHit(z, dmg, stun, by) {
+/* head shots hit 2.5x. Legs and arms have 2 hit points of their own; when one is gone the limb comes off. */
+function applyHit(z, dmg, stun, by, zone, side) {
   if (z.state !== 'active' && z.state !== 'leaving') return;
-  z.hp -= dmg; z.flashT = 0.1; setFlash(z, true);
+  let d = dmg;
+  if (zone === 'head') d = dmg * 2.5;
+  else if (zone === 'leg' || zone === 'arm') {
+    d = dmg * 0.5;
+    const idx = (zone === 'leg' ? 0 : 2) + (side ? 1 : 0);
+    if (!z.lost[idx]) { z.limbHp[idx] -= dmg; if (z.limbHp[idx] <= 0) sever(z, idx); }
+  }
+  z.hp -= d; z.flashT = 0.1; setFlash(z, true);
   z.slow = Math.max(z.slow, stun);
   z.fill.scale.x = Math.max(0.001, z.hp / z.maxHp);
   burst(z.x, 1.4, z.z, z.def.color, 3, 3);
@@ -775,6 +874,36 @@ function killZombie(z, by) {
   if (by === net.myId) score += pts; else netToPeer(by, { t: 'pts', n: pts });
   burst(z.x, 1.3, z.z, z.def.color, 10, 6); burst(z.x, 1.3, z.z, 0x8fae86, 8, 5);
   tone(260, 0.3, 'sawtooth', 0.07, -200); noise(0.18, 0.08);
+}
+/* the ray from _o along _d against an upright cylinder; returns where it passes and how high up the body */
+function rayCyl(cx, cz, base, height, hr, reach) {
+  const hd = _d.x * _d.x + _d.z * _d.z; if (hd < 1e-8) return null;
+  const t = ((cx - _o.x) * _d.x + (cz - _o.z) * _d.z) / hd;
+  if (t < 0 || t > reach) return null;
+  const hx = _o.x + _d.x * t, hz = _o.z + _d.z * t, rel = _o.y + _d.y * t - base;
+  if (Math.hypot(hx - cx, hz - cz) > hr || rel < -0.1 || rel > height) return null;
+  return { t, rel, hx, hz };
+}
+function zombieHit(z, reach, radius) {
+  const fy = floorY(z.x, z.z);
+  if (z.mode === 'walk') {
+    const h = rayCyl(z.x, z.z, fy, 2.6, radius - 0.1, reach); if (!h) return null;
+    const lat = (h.hx - z.x) * Math.cos(z.rot) - (h.hz - z.z) * Math.sin(z.rot), side = lat > 0 ? 1 : 0;
+    if (h.rel > 1.85) return { t: h.t, zone: 'head', side: 0 };
+    if (h.rel < 1.15) return { t: h.t, zone: 'leg', side };
+    if (Math.abs(lat) > 0.5) return { t: h.t, zone: 'arm', side };
+    return { t: h.t, zone: 'body', side: 0 };
+  }
+  /* lying down: a low sphere, the head end is the front */
+  _e.set(z.x - _o.x, fy + 0.55 - _o.y, z.z - _o.z);
+  const t = _e.dot(_d); if (t < 0 || t > reach) return null;
+  const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
+  if (Math.sqrt(ex * ex + ey * ey + ez * ez) > radius + 0.15) return null;
+  const hx = _o.x + _d.x * t - z.x, hz = _o.z + _d.z * t - z.z;
+  const fo = hx * -Math.sin(z.rot) + hz * -Math.cos(z.rot), lat = hx * Math.cos(z.rot) - hz * Math.sin(z.rot);
+  if (fo > 0.6) return { t, zone: 'head', side: 0 };
+  if (Math.abs(lat) > 0.55) return { t, zone: 'arm', side: lat > 0 ? 1 : 0 };
+  return { t, zone: 'body', side: 0 };
 }
 function fire() {
   const w = WEAPONS[wIdx];
@@ -795,28 +924,22 @@ function fire() {
     const reach = wallDist(_o, _d, 60), hits = [];
     for (const z of zombies) {
       if (z.state !== 'active' && z.state !== 'leaving') continue;
-      _e.set(z.x - _o.x, 1.2 + floorY(z.x, z.z) - _o.y, z.z - _o.z);
-      const t = _e.dot(_d);
-      if (t < 0 || t > reach) continue;
-      const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
-      if (Math.sqrt(ex * ex + ey * ey + ez * ez) < radius) hits.push({ z, t });
+      const h = zombieHit(z, reach, radius);
+      if (h) hits.push({ z, t: h.t, zone: h.zone, side: h.side });
     }
     if (net.role && net.pvp) {
       for (const id in net.players) {
         const p = net.players[id];
         if (!p.seen || !p.a) continue;
-        _e.set(p.x - _o.x, 1.3 + (p.py || 0) - _o.y, p.z - _o.z);
-        const t = _e.dot(_d);
-        if (t < 0 || t > reach) continue;
-        const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
-        if (Math.sqrt(ex * ex + ey * ey + ez * ez) < radius) hits.push({ p, t });
+        const h = rayCyl(p.x, p.z, p.py || 0, 2.5, radius - 0.1, reach);
+        if (h) hits.push({ p, t: h.t, head: h.rel > 1.85 });
       }
     }
     hits.sort((a, b) => a.t - b.t);
     const list = w.pierce ? hits : hits.slice(0, 1);
     let end = reach;
     if (!w.pierce && list.length) end = list[0].t;
-    list.forEach(h => (h.p ? hitPlayer(h.p, w) : hitZombie(h.z, w)));
+    list.forEach(h => (h.p ? hitPlayer(h.p, w, h.head) : hitZombie(h.z, w, h.zone, h.side)));
     _e.copy(_o).addScaledVector(_d, end);
     tracer(_m, _e, w.color, w.pierce ? 0.12 : 0.035);
     netFx(_m, _e, w.color, w.pierce ? 0.12 : 0.035);
@@ -959,9 +1082,8 @@ function pitHit(pit) {
     const nx = ax ? pit.x + ax * (PIT_HALF + 0.6) : px, nz = az ? pit.z + az * (PIT_HALF + 0.6) : pz;
     if (!blockedP(nx, nz, 0.95)) { px = nx; pz = nz; break; }
   }
-  if (net.role) { takeDamage(20, -1); return; }
-  hp -= 20; el.hurt.classList.add('on'); setTimeout(() => el.hurt.classList.remove('on'), 120);
-  if (hp <= 0) hurt(null); else toast('SPIKES. JUMP THE PITS', '#ff3b4e');
+  takeDamage(20, -1);
+  if (hp > 0) toast('SPIKES. JUMP THE PITS', '#ff3b4e');
 }
 
 /* a fresh map plus fresh pits for a level */
@@ -1067,7 +1189,7 @@ function netTick(dt) {
   net.t += dt;
   if (net.role === 'host' && net.t >= 1 / 15) {
     net.t = 0;
-    netBroadcast({ t: 'snap', z: zombies.map(z => [r2(z.x), r2(z.z), r2(z.rot), z.state, z.hp, z.maxHp]), p: allP() });
+    netBroadcast({ t: 'snap', z: zombies.map(z => [r2(z.x), r2(z.z), r2(z.rot), z.state, r2(z.hp), z.maxHp, z.mode === 'walk' ? 0 : z.mode === 'fall' ? 1 : 2, (z.lost[0] ? 1 : 0) | (z.lost[1] ? 2 : 0) | (z.lost[2] ? 4 : 0) | (z.lost[3] ? 8 : 0)]), p: allP() });
   } else if (net.role === 'client' && net.t >= 1 / 20) {
     net.t = 0; netSend({ t: 'st', a: myP() });
   }
@@ -1079,7 +1201,7 @@ function hostContact(dt) {
     const p = net.players[id]; p.inv = Math.max(0, p.inv - dt);
     if (!p.a || p.inv > 0 || !p.seen || freezeT > 0) continue;
     for (const z of zombies) {
-      if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - p.x, z.z - p.z) < 1.5 && Math.abs((p.py || 0) - floorY(z.x, z.z)) < 1.0) {
+      if ((z.state === 'active' || z.state === 'leaving') && z.mode !== 'fall' && Math.hypot(z.x - p.x, z.z - p.z) < 1.5 && Math.abs((p.py || 0) - floorY(z.x, z.z)) < 1.0) {
         netToPeer(+id, { t: 'hurt' }); p.inv = 1.5; placeZombie(z, z.i, 2); break;
       }
     }
@@ -1111,7 +1233,8 @@ function onHostData(id, m) {
     case 'st': setRemote(p, m.a); if (!p.a) hostCheckOver(); break;
     case 'hit': {
       const z = zombies[m.zi];
-      if (z && state === 'play') applyHit(z, Math.min(6, +m.dmg || 1), Math.min(1, +m.stun || 0), id);
+      const zone = ['head', 'body', 'leg', 'arm'].includes(m.zone) ? m.zone : 'body';
+      if (z && state === 'play') applyHit(z, Math.min(6, +m.dmg || 1), Math.min(1, +m.stun || 0), id, zone, m.side ? 1 : 0);
       break;
     }
     case 'pvp': {
@@ -1157,7 +1280,7 @@ function puppetZombie(z, dt) {
   if (z.flashT > 0) { z.flashT -= dt; if (z.flashT <= 0) setFlash(z, false); }
   if (z.state === 'dead') {
     z.deadT += dt;
-    m.rotation.x = Math.min(1, z.deadT / 0.45) * Math.PI / 2;
+    m.rotation.x = z.mode === 'walk' ? Math.min(1, z.deadT / 0.45) * Math.PI / 2 : -1.45;
     m.position.y = -Math.max(0, z.deadT - 0.9) * 1.2;
     z.bar.visible = false;
     if (z.deadT > 1.6) m.visible = false;
@@ -1167,7 +1290,7 @@ function puppetZombie(z, dt) {
   z.x += (z.tx - z.x) * k; z.z += (z.tz - z.z) * k;
   let d = z.trot - z.rot; d = Math.atan2(Math.sin(d), Math.cos(d)); z.rot += d * k;
   m.rotation.y = z.rot; m.position.set(z.x, pen ? Math.sin(z.anim * 2) * 0.05 : floorY(z.x, z.z), z.z);
-  z.anim += dt * (pen ? 2 : zSpeed() * 1.6); animLimbs(z, pen ? 0.4 : 1);
+  z.modeT += dt; z.anim += z.mode !== 'walk' ? dt * 1.5 : dt * (pen ? 2 : zSpeed() * 1.6); animLimbs(z, pen ? 0.4 : 1);
   z.bar.visible = z.hp < z.maxHp && !pen;
   if (z.bar.visible) z.bar.rotation.y = Math.atan2(px - z.x, pz - z.z) - z.rot;
 }
@@ -1181,9 +1304,13 @@ function applySnap(m) {
       z.deadT = 0; burst(z.x, 1.3, z.z, z.def.color, 10, 6); burst(z.x, 1.3, z.z, 0x8fae86, 8, 5);
       tone(260, 0.3, 'sawtooth', 0.05, -200);
     }
-    if (ns !== 'dead' && prev === 'dead') { z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.y = 0; z.x = z.tx; z.z = z.tz; }
+    if (ns !== 'dead' && prev === 'dead') { resetLimbs(z); z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.y = 0; z.x = z.tx; z.z = z.tz; }
     if (!z.nseen) { z.x = z.tx; z.z = z.tz; z.rot = z.trot; z.nseen = true; }
     z.state = ns;
+    const nm = a[6] === 1 ? 'fall' : a[6] === 2 ? 'crawl' : 'walk', mask = a[7] | 0;
+    if (mask === 0 && z.lost.some(Boolean)) resetLimbs(z);
+    for (let b = 0; b < 4; b++) if ((mask & (1 << b)) && !z.lost[b]) severFx(z, b);
+    if (nm !== z.mode) { z.mode = nm; z.modeT = 0; }
   });
   const seen = {};
   m.p.forEach(a => {
@@ -1207,6 +1334,7 @@ function onClientData(m) {
     case 'pts': score += m.n; if (m.msg) toast(m.msg, '#46e6ff'); break;
     case 'hurt': takeDamage(25, -1); break;
     case 'dmg': takeDamage(m.n, m.by); break;
+    case 'pause': clientPause(!!m.on); break;
     case 'clear': score += m.bonus; showClear(m.bonus); break;
     case 'next': nextLevel(); break;
     case 'over': net.phase = 'over'; showMpOver(m.res); break;
@@ -1214,9 +1342,10 @@ function onClientData(m) {
 }
 
 /* ---------- shooting each other: the victim owns their own health ---------- */
-function hitPlayer(p, w) {
+function hitPlayer(p, w, head) {
   el.cross.classList.add('hit'); setTimeout(() => el.cross.classList.remove('hit'), 90);
-  const n = w.pvp;
+  const n = Math.round(w.pvp * (head ? 1.8 : 1));
+  if (head) { el.cross.classList.add('head'); setTimeout(() => el.cross.classList.remove('head'), 160); tone(900, 0.07, 'square', 0.05); }
   p.hp = Math.max(0, p.hp - n);
   burst(p.x, 1.4, p.z, PCOLORS[p.id], 3, 3); tone(220, 0.05, 'square', 0.04);
   if (net.role === 'host') netToPeer(p.id, { t: 'dmg', n, by: 0 });
@@ -1229,7 +1358,7 @@ function takeDamage(n, by, z) {
   tone(140, 0.12, 'sawtooth', 0.07, -60);
   if (by === -1) invuln = 1.2;
   if (z) placeZombie(z, z.i, 2);
-  if (hp <= 0) die(by);
+  if (hp <= 0) { if (net.role) die(by); else hurt(z); }
 }
 function die(by) {
   lives--; updateLives(); const lost = loseGun(); noise(0.25, 0.1); tone(110, 0.4, 'sawtooth', 0.12, -60);
@@ -1451,7 +1580,7 @@ function panel(title, sub, body, btn, handler) {
   el.panel.hidden = false; bindPanel();
   if (handler) { try { b.focus({ preventScroll: true }); } catch (e) {} }
 }
-const rulesHtml = () => '<ul class="rules"><li>Walk over dots to collect them. Every dot is ammo.</li><li>Big dots are power-ups: haste, shield, frenzy, freeze, medkit, ammo.</li><li>You get a better gun every level (pistol, SMG, shotgun, rail cannon). Die and you drop one.</li><li>Every level is a new random map with ramps to climb and spike pits to jump.</li><li>Sprinting drains the sprint bar. It refills slowly.</li><li>Four zombies hunt you, each in its own way. Eat every dot to clear the level.</li></ul>';
+const rulesHtml = () => '<ul class="rules"><li>Walk over dots to collect them. Every dot is ammo.</li><li>Big dots are power-ups: haste, shield, frenzy, freeze, medkit, ammo.</li><li>You get a better gun every level (pistol, SMG, shotgun, rail cannon). Die and you drop one.</li><li>Every level is a new random map with ramps to climb and spike pits to jump.</li><li>Sprinting drains the sprint bar. It refills slowly.</li><li>Headshots hit hard. Shoot a leg off and the zombie drops, then crawls at you fast.</li><li>A bite takes 25 health, not a life.</li><li>Four zombies hunt you, each in its own way. Eat every dot to clear the level.</li></ul>';
 const rosterHtml = () => '<ul class="roster">' + ZDEF.map(z => '<li><i class="sw" style="background:' + z.css + '"></i><div><b>' + z.name + '</b><span>' + z.role + '</span></div></li>').join('') + '</ul>';
 const controlsHtml = () => isTouch
   ? '<p class="keys">Left thumb moves. Right thumb looks. FIRE shoots. Tap a gun chip to switch.</p>'
@@ -1535,12 +1664,27 @@ function hurt(z) {
   if (net.role) placeSelf(); else resetActors();
   toast('BITTEN. ' + lives + (lives === 1 ? ' LIFE LEFT' : ' LIVES LEFT') + (lost ? '. LOST THE ' + lost : ''), '#ff3b4e');
 }
+const leaveHtml = () => net.role ? '<button id="leavebtn" class="btn alt" type="button">LEAVE ROOM</button>' : '';
 function pause() {
-  if (state !== 'play' || net.role) return;
-  state = 'paused'; mouseFire = false; touchFire = false;
-  panel('Paused', 'The zombies are waiting.', controlsHtml(), 'RESUME', resume);
+  if (state !== 'play' || net.role === 'client') return;
+  state = 'paused'; mouseFire = false; touchFire = false; jumpHeld = false;
+  panel('Paused', net.role ? 'The whole room is paused.' : 'The zombies are waiting.', controlsHtml() + leaveHtml(), 'RESUME', resume);
+  if (net.role === 'host') netBroadcast({ t: 'pause', on: 1 });
 }
-function resume() { audioInit(); el.panel.hidden = true; state = 'play'; lastT = performance.now(); tryLock(); }
+function resume() {
+  audioInit(); el.panel.hidden = true; state = 'play'; lastT = performance.now(); tryLock();
+  if (net.role === 'host') netBroadcast({ t: 'pause', on: 0 });
+}
+/* only the host can pause a room; everyone else follows */
+function clientPause(on) {
+  if (on && state === 'play') {
+    state = 'paused'; mouseFire = false; touchFire = false; jumpHeld = false; releaseLock();
+    panel('Paused by host', 'Waiting for the host to resume.', leaveHtml(), null, null);
+  } else if (!on && state === 'paused') {
+    el.panel.hidden = true; state = 'play'; lastT = performance.now(); tryLock();
+    if (!isTouch) toast('CLICK TO AIM', '#46e6ff');
+  }
+}
 
 /* ---------- input ---------- */
 function tryLock() {
@@ -1658,7 +1802,7 @@ function step(dt) {
     for (const z of zombies) updateZombie(z, dt);
     if (invuln <= 0 && !ghost && freezeT <= 0) {
       for (const z of zombies) {
-        if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - px, z.z - pz) < 1.5 && Math.abs(py - floorY(z.x, z.z)) < 1.0) { if (net.role) takeDamage(25, -1, z); else hurt(z); break; }
+        if ((z.state === 'active' || z.state === 'leaving') && z.mode !== 'fall' && Math.hypot(z.x - px, z.z - pz) < 1.5 && Math.abs(py - floorY(z.x, z.z)) < 1.0) { takeDamage(25, -1, z); break; }
       }
     }
     if (net.role === 'host') hostContact(dt);
@@ -1671,7 +1815,7 @@ function step(dt) {
   }
 }
 function fx(dt) {
-  updateParticles(dt); updateTracers(dt);
+  updateParticles(dt); updateTracers(dt); updateGibs(dt);
   kick = Math.max(0, kick - dt * 7); flashT = Math.max(0, flashT - dt);
   const t = performance.now() / 1000;
   bigs.forEach((d, i) => { if (d.mesh.visible) { d.mesh.position.y = d.fy + 1.3 + Math.sin(t * 2 + i) * 0.18; d.mesh.userData.cage.rotation.y = t * 1.5; d.mesh.userData.cage.rotation.x = t * 0.8; } });
@@ -1688,7 +1832,7 @@ function fx(dt) {
   if (state === 'title') { yaw += dt * 0.25; }
 }
 function render() {
-  camera.position.set(px, EYE + py + bobY - landT * 1.2, pz);
+  camera.position.set(px, Math.min(WALL_H - 0.35, EYE + py + bobY - landT * 1.2), pz);
   camera.rotation.set(pitch, yaw, 0);
   renderer.clear();
   renderer.render(scene, camera);

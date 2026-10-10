@@ -37,10 +37,11 @@ button{font-family:inherit}
 .snd{position:absolute;top:14px;left:50%;transform:translateX(-50%);pointer-events:auto;font-size:10px;letter-spacing:.14em;font-weight:700;color:var(--dim);background:rgba(8,11,36,.8);border:1px solid var(--line);border-radius:999px;padding:6px 10px;cursor:pointer}
 .tr{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 #map{width:min(150px,34vw);height:auto;border:1px solid var(--line);border-radius:6px;background:rgba(5,6,15,.72)}
-#ver{position:fixed;right:16px;top:3px;z-index:5;font:700 10px/1 var(--body,sans-serif);letter-spacing:.12em;color:var(--dim);opacity:.7;pointer-events:none}
+#ver{position:absolute;right:16px;top:3px;z-index:5;font:700 10px/1 var(--body,sans-serif);letter-spacing:.12em;color:var(--dim);opacity:.7;pointer-events:none}
+#note{position:absolute;left:50%;top:14px;transform:translateX(-50%);z-index:70;font:700 12px/1 var(--body,sans-serif);letter-spacing:.16em;padding:8px 12px;border-radius:999px;background:rgba(8,11,36,.9);border:1px solid var(--line);opacity:0;pointer-events:none;transition:opacity .25s}
+#note.show{opacity:1}
+#ptitle span{cursor:default;-webkit-tap-highlight-color:transparent}
 #ver.home{z-index:60;right:14px;top:12px;font-size:13px;opacity:.9}
-#devsw{display:none;position:fixed;left:0;top:0;width:64px;height:64px;z-index:80;background:transparent;border:0;padding:0;opacity:0;cursor:default;-webkit-tap-highlight-color:transparent}
-#ver.home ~ #devsw{display:block}
 .gp p{margin:0 0 10px;font-weight:500}.gp .rules{margin-bottom:10px}.gtag{margin-bottom:8px}.gtag .sw{width:22px;height:22px;display:inline-block}
 .gnav{display:flex;gap:10px;justify-content:space-between;padding-top:6px}.gnav .btn[disabled]{opacity:.35;cursor:default}
 #lives{display:flex;gap:6px}
@@ -116,6 +117,8 @@ button{font-family:inherit}
 <body>
 <div id="app">
   <canvas id="view"></canvas>
+  <div id="ver"></div>
+  <div id="note"></div>
   <div id="touch" hidden><div id="stick"><i id="knob"></i></div></div>
   <div id="hud" hidden>
     <div id="bar"><i id="barfill"></i></div>
@@ -126,7 +129,6 @@ button{font-family:inherit}
       <div id="board"></div>
     </div>
     <button id="snd" class="snd" type="button" aria-label="Toggle sound">SOUND ON</button>
-    <div id="ver"></div><button id="devsw" type="button" tabindex="-1" aria-hidden="true"></button>
     <div class="tr"><canvas id="map" width="152" height="168"></canvas><div id="lives" aria-label="Lives left"></div></div>
     <div id="cross"></div>
     <div id="toast" role="status"></div>
@@ -176,7 +178,7 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.9.4';
+const VERSION = '0.9.5';
 let playerCount = 1;
 const MAXE = 8, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;
@@ -2676,6 +2678,7 @@ function showTitle() {
   state = 'title'; releaseLock(); $('ver').classList.add('home');
   el.hud.hidden = true; el.touch.hidden = true; el.fire.hidden = true; el.jump.hidden = true;
   panel('Dot Slayer', 'Eat dots. Shoot zombies. Survive.', basicsHtml() + controlsHtml() + modeHtml() + mpHtml(), 'PLAY SOLO', soloStart);
+  $('ptitle').innerHTML = 'Dot Slayer'.split('').map(c => c === ' ' ? ' ' : '<span data-ch="' + c.toUpperCase() + '">' + c + '</span>').join('');
 }
 
 /* ---------- flow ---------- */
@@ -2941,12 +2944,25 @@ function frame(now) {
 /* ---------- boot ---------- */
 try { best = +localStorage.getItem('dotslayer-best') || 0; } catch (e) {}
 window.addEventListener('touchstart', () => {}, { passive: true });
-$('devsw').onclick = () => {
+function devToggle() {
   devOn = !devOn;
   try { localStorage.setItem('dsDev', devOn ? '1' : '0'); } catch (e) { /* private mode */ }
   if (!devOn && gameMode === 3) { gameMode = 0; const fb = $('fastbtn'); if (fb) fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); }
-  toast(devOn ? 'DEV MODE UNLOCKED' : 'DEV MODE HIDDEN', devOn ? '#46e6ff' : '#9aa0b8');
-};
+  const n = $('note'); n.textContent = devOn ? 'DEV MODE UNLOCKED' : 'DEV MODE HIDDEN'; n.style.color = devOn ? '#46e6ff' : '#9aa0b8';
+  n.classList.add('show'); clearTimeout(devToggle.t); devToggle.t = setTimeout(() => n.classList.remove('show'), 1800);
+}
+/* secret: click the D, then the T, then the O of the title */
+let devSeq = 0, devSeqT = 0;
+$('ptitle').addEventListener('click', e => {
+  const ch = e.target && e.target.dataset ? e.target.dataset.ch : null;
+  if (!ch) return;
+  const now = performance.now();
+  if (now - devSeqT > 5000) devSeq = 0;
+  devSeqT = now;
+  const want = 'DTO'[devSeq];
+  if (ch === want) devSeq++; else devSeq = ch === 'D' ? 1 : 0;
+  if (devSeq === 3) { devSeq = 0; devToggle(); }
+});
 $('ver').textContent = 'v' + VERSION; buildChips(); updateLives(); buildGun(0); refreshChips(); drawMapBase(); resetActors(); resize(); showTitle();
 requestAnimationFrame(frame);
 

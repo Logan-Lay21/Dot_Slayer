@@ -709,7 +709,7 @@ function makeGuy(id) {
   return g;
 }
 function newRemote(id) {
-  return { id, name: 'P' + (id + 1), x: 0, z: 0, yaw: 0, tx: 0, tz: 0, tyaw: 0, pitch: 0, w: 0, l: 3, s: 0, a: true, hp: 100, inv: 0, seen: false, mesh: makeGuy(id) };
+  return { id, name: 'P' + (id + 1), x: 0, z: 0, yaw: 0, tx: 0, tz: 0, tyaw: 0, pitch: 0, w: 0, l: 3, s: 0, a: true, hp: 100, inv: 0, last: performance.now(), seen: false, mesh: makeGuy(id) };
 }
 function setRemote(p, a) {
   p.tx = a[1]; p.tz = a[2]; p.tyaw = a[3]; p.pitch = a[4]; p.w = a[5]; p.l = a[6]; p.s = a[7]; p.a = !!a[8]; p.hp = a.length > 9 ? a[9] : 100;
@@ -801,6 +801,7 @@ function mpNext() {
 }
 function onHostData(id, m) {
   const p = net.players[id]; if (!p || !m) return;
+  p.last = performance.now();
   switch (m.t) {
     case 'st': setRemote(p, m.a); if (!p.a) hostCheckOver(); break;
     case 'hit': {
@@ -977,10 +978,27 @@ function netReset() {
 function leaveRoom() { netReset(); resetActors(); showTitle(); }
 function hostGone() { leaveRoom(); showNote('The room closed', 'The host left the game.'); }
 function randCode() { let s = ''; for (let i = 0; i < 4; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
+/* Extra STUN plus a public TURN relay so players on different networks or phone data can still connect. */
+const PEER_OPTS = { config: { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' },
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }
+] } };
+/* Keepalive: clients ping the host, the host frees slots held by dead connections (a failed join used to hold a slot until the browser timed out). */
+setInterval(() => {
+  if (net.role === 'client' && net.hostConn && net.hostConn.open) netSend({ t: 'ping' });
+  if (net.role === 'host') {
+    const now = performance.now();
+    for (const id in net.conns) {
+      const p = net.players[id];
+      if (p && now - p.last > 7000) { try { net.conns[id].close(); } catch (e) {} dropPlayer(+id); }
+    }
+  }
+  if (net.peer && net.peer.disconnected && !net.peer.destroyed && net.peer.reconnect) { try { net.peer.reconnect(); } catch (e) {} }
+}, 1000);
 function hostRoom(tries) {
   if (!window.Peer) { showNote('Multiplayer unavailable', 'The connection library did not load. Check your internet and reload.'); return; }
   netReset();
-  const code = randCode(), peer = new Peer('dotslayer-' + code);
+  const code = randCode(), peer = new Peer('dotslayer-' + code, PEER_OPTS);
   net.role = 'host'; net.code = code; net.peer = peer; net.phase = 'lobby'; net.myId = 0;
   panel('Opening room', 'One moment.', '', null, null);
   peer.on('open', () => {
@@ -999,7 +1017,7 @@ function joinRoom(raw) {
   if (code.length !== 4) { showNote('Check the code', 'Room codes are 4 letters or numbers.'); return; }
   if (!window.Peer) { showNote('Multiplayer unavailable', 'The connection library did not load. Check your internet and reload.'); return; }
   netReset();
-  const peer = new Peer();
+  const peer = new Peer(undefined, PEER_OPTS);
   net.role = 'client'; net.code = code; net.peer = peer; net.phase = 'lobby';
   panel('Joining ' + code, 'Connecting.', '', null, null);
   const fail = msg => { if (net.peer !== peer) return; leaveRoom(); showNote('Could not join', msg); };
@@ -1010,7 +1028,7 @@ function joinRoom(raw) {
     c.on('open', () => { if (net.peer === peer) panel('Room joined', 'Waiting for the host to start.', lobbyBody(), null, null); });
     c.on('data', onClientData);
     c.on('close', () => { if (net.peer === peer && net.role === 'client') hostGone(); });
-    setTimeout(() => { if (net.peer === peer && !c.open) fail('Could not reach that room. Check the code, or try another network.'); }, 12000);
+    setTimeout(() => { if (net.peer === peer && !c.open) fail('Could not reach that room. Check the code, or try another network.'); }, 20000);
   });
   peer.on('error', err => fail(err.type === 'peer-unavailable' ? 'No room with that code.' : 'Error: ' + err.type));
 }

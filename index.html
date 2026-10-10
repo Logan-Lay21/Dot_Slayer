@@ -178,7 +178,7 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.9.5';
+const VERSION = '0.9.7';
 let playerCount = 1;
 const MAXE = 8, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;
@@ -991,7 +991,25 @@ function wallRoute(z) {
   }
   return best;
 }
+/* the Wall never turns around in a hall: it picks any open way except straight back, and waits if that is all there is */
+function wallNext(z) {
+  const ld = (z.dir[0] || z.dir[1]) ? z.dir : (z.lastDir || [0, 0]);
+  let best = null, bd = 1e9;
+  for (const d of DIRS) {
+    if (d[0] === -ld[0] && d[1] === -ld[1] && (ld[0] || ld[1])) continue;
+    const nc = z.c + d[0], nr = z.r + d[1];
+    if (blockedFor(z, nc, nr)) continue;
+    const dd = (nc - z.tc) * (nc - z.tc) + (nr - z.tr) * (nr - z.tr);
+    if (dd < bd) { bd = dd; best = d; }
+  }
+  /* a true dead end is the only time he may turn around */
+  if (!best && (ld[0] || ld[1]) && !blockedFor(z, z.c - ld[0], z.r - ld[1])) best = [-ld[0], -ld[1]];
+  z.lastDir = ld;
+  if (!best) { z.dir = [0, 0]; z.nc = z.c; z.nr = z.r; return; }
+  z.lastDir = best; z.dir = best; z.nc = z.c + best[0]; z.nr = z.r + best[1];
+}
 function chooseNext(z) {
+  if (z.kind === 'wall') { wallNext(z); return; }
   if (z.state === 'active' && wallNear(z)) {
     const b = wallRoute(z);
     if (b) { z.dir = b; z.nc = z.c + b[0]; z.nr = z.r + b[1]; return; }
@@ -1294,7 +1312,7 @@ function clearPowers() { for (const k in pu) pu[k] = 0; freezeT = 0; }
 
 /* ---------- spike pits: new random layout every level, same for everyone in a room ---------- */
 const PIT_MAX = 12, PIT_HALF = 1.7;
-const pitBase = new THREE.InstancedMesh(new THREE.BoxGeometry(PIT_HALF * 2 + 0.5, 0.04, PIT_HALF * 2 + 0.5), new THREE.MeshBasicMaterial({ color: 0xff3b4e }), PIT_MAX);
+const pitBase = new THREE.InstancedMesh(new THREE.BoxGeometry(PIT_HALF * 2 + 0.5, 0.04, PIT_HALF * 2 + 0.5), new THREE.MeshBasicMaterial({ color: 0x2b3050 }), PIT_MAX);
 const pitHole = new THREE.InstancedMesh(new THREE.BoxGeometry(PIT_HALF * 2, 0.05, PIT_HALF * 2), new THREE.MeshBasicMaterial({ color: 0x07000c }), PIT_MAX);
 const pitSpike = new THREE.InstancedMesh(new THREE.ConeGeometry(0.2, 1.0, 6), new THREE.MeshBasicMaterial({ color: 0xdfe6ff }), PIT_MAX * 16);
 [pitBase, pitHole, pitSpike].forEach(m => { m.frustumCulled = false; m.count = 0; scene.add(m); });
@@ -1542,7 +1560,7 @@ function makeSpecial(p, id) {
 function resetSpecial(s) {
   const h = s.home;
   s.x = s.tx = h.x; s.z = s.tz = h.z; s.y = s.ty = h.y; s.rot = s.trot = h.rot;
-  s.st = 0; s.stT = 0; s.pause = 0; s.cool = 1.5; s.state = 'active'; s.flashT = 0; s.nseen = false;
+  s.lastDir = null; s.st = 0; s.stT = 0; s.pause = 0; s.cool = 1.5; s.state = 'active'; s.flashT = 0; s.nseen = false;
   s.mesh.visible = s.kind !== 'stalker'; s.mesh.scale.set(1, 1, 1); s.mesh.scale.setScalar(s.kind === 'charger' ? 1.3 : s.kind === 'ambusher' ? 0.8 : s.kind === 'stalker' ? 1.1 : 1);
   if (s.kind === 'wall') s.mesh.scale.y = WALL_BH / 4.45;
   if (s.kind === 'stalker') { s.cool = 14; s.tid = -1; s.idx = 0; s.nseen = false; }

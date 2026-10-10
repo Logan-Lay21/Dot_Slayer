@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dot Slayer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,6 +18,8 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 html,body{height:100%}
 body{margin:0;background:var(--ink);color:var(--text);font:600 15px/1.35 var(--ui);overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
 button{font-family:inherit}
@@ -84,9 +91,16 @@ button{font-family:inherit}
 #board{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:700;letter-spacing:.06em;font-variant-numeric:tabular-nums}
 #board .pl{display:flex;align-items:center;gap:6px}
 #board .sw{width:9px;height:9px}
+#board .hpb{display:inline-block;width:34px;height:5px;border-radius:3px;background:rgba(255,255,255,.15);overflow:hidden}
+#board .hpb i{display:block;height:100%;background:#5ef28a}
+#hpwrap{position:relative;width:min(240px,60vw);height:18px;border:2px solid var(--line);border-radius:9px;background:rgba(5,6,15,.75);overflow:hidden}
+#hpfill{position:absolute;left:0;top:0;bottom:0;width:100%;background:#5ef28a;transition:width .12s}
+#hptext{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:.1em;color:#fff;text-shadow:0 1px 0 #000}
 @media (prefers-reduced-motion:reduce){#ammo.low{animation:none}}
 </style>
 
+</head>
+<body>
 <div id="app">
   <canvas id="view"></canvas>
   <div id="touch" hidden><div id="stick"><i id="knob"></i></div></div>
@@ -102,7 +116,7 @@ button{font-family:inherit}
     <div class="tr"><canvas id="map" width="114" height="126"></canvas><div id="lives" aria-label="Lives left"></div></div>
     <div id="cross"></div>
     <div id="toast" role="status"></div>
-    <div class="bm"><div id="ammo">0</div><span class="lbl">Ammo</span><div id="guns"></div></div>
+    <div class="bm"><div id="hpwrap" hidden><i id="hpfill"></i><b id="hptext">100</b></div><div id="ammo">0</div><span class="lbl">Ammo</span><div id="guns"></div></div>
     <div id="hurt"></div>
   </div>
   <button id="fire" type="button" hidden>FIRE</button>
@@ -255,10 +269,10 @@ bigs.forEach(d => {
 
 /* ---------- weapons ---------- */
 const WEAPONS = [
-  { name: 'PISTOL', short: 'PISTOL', dmg: 1, cd: 0.4, cost: 1, pellets: 1, spread: 0, pierce: false, color: 0xdfe6ff, stun: 0.35 },
-  { name: 'SMG', short: 'SMG', dmg: 1, cd: 0.1, cost: 1, pellets: 1, spread: 0.018, pierce: false, color: 0xffd84a, stun: 0.2 },
-  { name: 'SHOTGUN', short: 'SHOTGUN', dmg: 1, cd: 0.72, cost: 2, pellets: 8, spread: 0.07, pierce: false, color: 0xff9a2e, stun: 0.5 },
-  { name: 'RAIL CANNON', short: 'RAIL', dmg: 6, cd: 0.6, cost: 3, pellets: 1, spread: 0, pierce: true, color: 0x46e6ff, stun: 0.9 }
+  { name: 'PISTOL', short: 'PISTOL', dmg: 1, cd: 0.4, cost: 1, pellets: 1, spread: 0, pierce: false, color: 0xdfe6ff, stun: 0.35, pvp: 14 },
+  { name: 'SMG', short: 'SMG', dmg: 1, cd: 0.1, cost: 1, pellets: 1, spread: 0.018, pierce: false, color: 0xffd84a, stun: 0.2, pvp: 8 },
+  { name: 'SHOTGUN', short: 'SHOTGUN', dmg: 1, cd: 0.72, cost: 2, pellets: 8, spread: 0.07, pierce: false, color: 0xff9a2e, stun: 0.5, pvp: 7 },
+  { name: 'RAIL CANNON', short: 'RAIL', dmg: 6, cd: 0.6, cost: 3, pellets: 1, spread: 0, pierce: true, color: 0x46e6ff, stun: 0.9, pvp: 40 }
 ];
 
 /* gun viewmodel lives in its own scene so it never clips into walls */
@@ -382,11 +396,11 @@ let state = 'title', score = 0, level = 1, lives = 3, ammo = 16, tier = 0, wIdx 
 let px = 0, pz = 0, yaw = Math.PI / 2, pitch = 0, invuln = 0, fireCd = 0, kick = 0, flashT = 0, bobT = 0, bobY = 0;
 let aliveDots = dotList.length, scatter = true, modeT = 0, lastT = performance.now();
 const keys = {}, stick = { x: 0, y: 0 };
-let mouseFire = false, touchFire = false, queued = false, locked = false, hadLock = false, ghost = false;
-const net = { role: null, phase: 'lobby', code: '', peer: null, hostConn: null, conns: {}, players: {}, lobby: [], myId: 0, t: 0, boardT: 0 };
+let mouseFire = false, touchFire = false, queued = false, locked = false, hadLock = false, ghost = false, hp = 100;
+const net = { role: null, phase: 'lobby', code: '', peer: null, hostConn: null, conns: {}, players: {}, lobby: [], myId: 0, t: 0, boardT: 0, pvp: true };
 const START_COLS = [9, 7, 11, 5];
 const r2 = v => Math.round(v * 100) / 100;
-function placeSelf() { px = (START_COLS[net.myId] + 0.5) * CS; pz = (playerStart.r + 0.5) * CS; yaw = Math.PI / 2; pitch = 0; invuln = 3; }
+function placeSelf() { px = (START_COLS[net.myId] + 0.5) * CS; pz = (playerStart.r + 0.5) * CS; yaw = Math.PI / 2; pitch = 0; invuln = 3; hp = 100; }
 function netPlayers() {
   const out = [{ id: net.myId, x: px, z: pz, yaw: yaw, a: !ghost }];
   if (net.role === 'host') for (const id in net.players) out.push(net.players[id]);
@@ -591,11 +605,22 @@ function fire() {
       const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
       if (Math.sqrt(ex * ex + ey * ey + ez * ez) < radius) hits.push({ z, t });
     }
+    if (net.role && net.pvp) {
+      for (const id in net.players) {
+        const p = net.players[id];
+        if (!p.seen || !p.a) continue;
+        _e.set(p.x - _o.x, 1.3 - _o.y, p.z - _o.z);
+        const t = _e.dot(_d);
+        if (t < 0 || t > reach) continue;
+        const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
+        if (Math.sqrt(ex * ex + ey * ey + ez * ez) < radius) hits.push({ p, t });
+      }
+    }
     hits.sort((a, b) => a.t - b.t);
     const list = w.pierce ? hits : hits.slice(0, 1);
     let end = reach;
     if (!w.pierce && list.length) end = list[0].t;
-    list.forEach(h => hitZombie(h.z, w));
+    list.forEach(h => (h.p ? hitPlayer(h.p, w) : hitZombie(h.z, w)));
     _e.copy(_o).addScaledVector(_d, end);
     tracer(_m, _e, w.color, w.pierce ? 0.12 : 0.035);
     netFx(_m, _e, w.color, w.pierce ? 0.12 : 0.035);
@@ -674,14 +699,20 @@ function makeGuy(id) {
   const x = c.getContext('2d'); x.font = '700 30px sans-serif'; x.textAlign = 'center'; x.fillStyle = PCSS[id]; x.fillText('P' + (id + 1), 64, 34);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
   sp.scale.set(1.6, 0.6, 1); sp.position.y = 3.0; g.add(sp);
+  const bar = new THREE.Group(); bar.position.y = 3.5; g.add(bar);
+  bar.add(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.16), new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.7 })));
+  const fg = new THREE.PlaneGeometry(1.2, 0.16); fg.translate(0.6, 0, 0);
+  const fill = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: 0x5ef28a, side: THREE.DoubleSide }));
+  fill.position.set(-0.6, 0, 0.01); bar.add(fill);
+  g.userData.bar = bar; g.userData.fill = fill;
   g.visible = false; scene.add(g);
   return g;
 }
 function newRemote(id) {
-  return { id, name: 'P' + (id + 1), x: 0, z: 0, yaw: 0, tx: 0, tz: 0, tyaw: 0, pitch: 0, w: 0, l: 3, s: 0, a: true, inv: 0, seen: false, mesh: makeGuy(id) };
+  return { id, name: 'P' + (id + 1), x: 0, z: 0, yaw: 0, tx: 0, tz: 0, tyaw: 0, pitch: 0, w: 0, l: 3, s: 0, a: true, hp: 100, inv: 0, seen: false, mesh: makeGuy(id) };
 }
 function setRemote(p, a) {
-  p.tx = a[1]; p.tz = a[2]; p.tyaw = a[3]; p.pitch = a[4]; p.w = a[5]; p.l = a[6]; p.s = a[7]; p.a = !!a[8];
+  p.tx = a[1]; p.tz = a[2]; p.tyaw = a[3]; p.pitch = a[4]; p.w = a[5]; p.l = a[6]; p.s = a[7]; p.a = !!a[8]; p.hp = a.length > 9 ? a[9] : 100;
   if (!p.seen) { p.x = p.tx; p.z = p.tz; p.yaw = p.tyaw; p.seen = true; }
 }
 function removeRemote(id) {
@@ -696,6 +727,9 @@ function updateRemotes(dt) {
     p.x += (p.tx - p.x) * k; p.z += (p.tz - p.z) * k;
     let dy = p.tyaw - p.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); p.yaw += dy * k;
     p.mesh.visible = p.a; p.mesh.position.set(p.x, 0, p.z); p.mesh.rotation.y = p.yaw;
+    const f = Math.max(0.001, p.hp / 100), ud = p.mesh.userData;
+    ud.fill.scale.x = f; ud.fill.material.color.setHSL(f * 0.33, 0.85, 0.5);
+    ud.bar.rotation.y = Math.atan2(px - p.x, pz - p.z) - p.yaw;
   }
 }
 
@@ -720,10 +754,10 @@ function remoteDot(n) {
   if (d.big) d.mesh.visible = false; else { dotMesh.setMatrixAt(d.idx, ZERO); dotMesh.instanceMatrix.needsUpdate = true; }
   return true;
 }
-function myP() { return [net.myId, r2(px), r2(pz), r2(yaw), r2(pitch), wIdx, lives, score, ghost ? 0 : 1]; }
+function myP() { return [net.myId, r2(px), r2(pz), r2(yaw), r2(pitch), wIdx, lives, score, ghost ? 0 : 1, Math.ceil(hp)]; }
 function allP() {
   const out = [myP()];
-  for (const id in net.players) { const p = net.players[id]; out.push([p.id, p.tx, p.tz, p.tyaw, p.pitch, p.w, p.l, p.s, p.a ? 1 : 0]); }
+  for (const id in net.players) { const p = net.players[id]; out.push([p.id, p.tx, p.tz, p.tyaw, p.pitch, p.w, p.l, p.s, p.a ? 1 : 0, p.hp]); }
   return out;
 }
 function netTick(dt) {
@@ -743,7 +777,7 @@ function hostContact(dt) {
     if (!p.a || p.inv > 0 || !p.seen) continue;
     for (const z of zombies) {
       if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - p.x, z.z - p.z) < 1.5) {
-        netToPeer(+id, { t: 'hurt' }); p.inv = 3; placeZombie(z, z.i, 2); break;
+        netToPeer(+id, { t: 'hurt' }); p.inv = 1.5; placeZombie(z, z.i, 2); break;
       }
     }
   }
@@ -757,7 +791,7 @@ function hostCheckOver() {
 function hostStart() {
   net.phase = 'play';
   for (const id in net.players) { net.players[id].inv = 3; net.players[id].a = true; }
-  netBroadcast({ t: 'begin' });
+  netBroadcast({ t: 'begin', pvp: net.pvp });
   newGame();
 }
 function mpNext() {
@@ -772,6 +806,17 @@ function onHostData(id, m) {
     case 'hit': {
       const z = zombies[m.zi];
       if (z && state === 'play') applyHit(z, Math.min(6, +m.dmg || 1), Math.min(1, +m.stun || 0), id);
+      break;
+    }
+    case 'pvp': {
+      const n = Math.min(60, +m.n || 0);
+      if (!net.pvp || !n || state !== 'play') break;
+      if (m.to === 0) takeDamage(n, id); else if (net.conns[m.to]) netToPeer(m.to, { t: 'dmg', n, by: id });
+      break;
+    }
+    case 'killed': {
+      const msg = 'YOU GOT P' + (id + 1);
+      if (m.by === 0) { score += 300; toast(msg, '#46e6ff'); } else netToPeer(m.by, { t: 'pts', n: 300, msg });
       break;
     }
     case 'dot': if (remoteDot(m.n)) netBroadcast({ t: 'dot', n: m.n }, id); break;
@@ -847,18 +892,53 @@ function onClientData(m) {
   if (!m) return;
   switch (m.t) {
     case 'welcome': net.myId = m.id; break;
-    case 'lobby': net.lobby = m.list; renderLobby(); break;
+    case 'lobby': net.lobby = m.list; net.pvp = !!m.pvp; renderLobby(); break;
     case 'reject': leaveRoom(); showNote('Could not join', m.reason); break;
-    case 'begin': net.phase = 'play'; newGame(); if (!isTouch) toast('CLICK TO AIM', '#46e6ff'); break;
+    case 'begin': net.phase = 'play'; net.pvp = !!m.pvp; newGame(); if (!isTouch) toast('CLICK TO AIM', '#46e6ff'); break;
     case 'snap': applySnap(m); break;
     case 'dot': remoteDot(m.n); break;
     case 'fx': spawnFx(m); break;
-    case 'pts': score += m.n; break;
-    case 'hurt': if (state === 'play' && !ghost) hurt(null); break;
+    case 'pts': score += m.n; if (m.msg) toast(m.msg, '#46e6ff'); break;
+    case 'hurt': takeDamage(25, -1); break;
+    case 'dmg': takeDamage(m.n, m.by); break;
     case 'clear': score += m.bonus; showClear(m.bonus); break;
     case 'next': nextLevel(); break;
     case 'over': net.phase = 'over'; showMpOver(m.res); break;
   }
+}
+
+/* ---------- shooting each other: the victim owns their own health ---------- */
+function hitPlayer(p, w) {
+  el.cross.classList.add('hit'); setTimeout(() => el.cross.classList.remove('hit'), 90);
+  const n = w.pvp;
+  p.hp = Math.max(0, p.hp - n);
+  burst(p.x, 1.4, p.z, PCOLORS[p.id], 3, 3); tone(220, 0.05, 'square', 0.04);
+  if (net.role === 'host') netToPeer(p.id, { t: 'dmg', n, by: 0 });
+  else netSend({ t: 'pvp', to: p.id, n });
+}
+function takeDamage(n, by, z) {
+  if (ghost || invuln > 0 || state !== 'play') return;
+  hp = Math.max(0, hp - n);
+  el.hurt.classList.add('on'); setTimeout(() => el.hurt.classList.remove('on'), 120);
+  tone(140, 0.12, 'sawtooth', 0.07, -60);
+  if (by === -1) invuln = 1.2;
+  if (z) placeZombie(z, z.i, 2);
+  if (hp <= 0) die(by);
+}
+function die(by) {
+  lives--; updateLives(); noise(0.25, 0.1); tone(110, 0.4, 'sawtooth', 0.12, -60);
+  if (by >= 0) {
+    const msg = 'YOU GOT P' + (net.myId + 1);
+    if (net.role === 'host') netToPeer(by, { t: 'pts', n: 300, msg });
+    else netSend({ t: 'killed', by });
+  }
+  if (lives <= 0) {
+    ghost = true; hp = 0; toast('YOU ARE DOWN. TEAM FIGHTS ON', '#ff3b4e');
+    if (net.role === 'host') hostCheckOver(); else netSend({ t: 'st', a: myP() });
+    return;
+  }
+  placeSelf();
+  toast((by >= 0 ? 'P' + (by + 1) + ' GOT YOU. ' : 'BITTEN. ') + lives + (lives === 1 ? ' LIFE LEFT' : ' LIVES LEFT'), '#ff3b4e');
 }
 
 /* ---------- rooms and panels ---------- */
@@ -871,10 +951,13 @@ function lobbyBody() {
   const list = net.role === 'host' ? hostList() : net.lobby;
   return '<div class="code">' + net.code + '</div><ul class="roster">' +
     list.map(p => '<li><i class="sw" style="background:' + PCSS[p.id] + '"></i><div><b>' + p.name + (p.id === net.myId ? ' (you)' : '') + '</b><span>' + (p.id === 0 ? 'host' : 'joined') + '</span></div></li>').join('') +
-    '</ul><button id="leavebtn" class="btn alt" type="button">LEAVE ROOM</button>';
+    '</ul>' + (net.role === 'host'
+      ? '<button id="pvpbtn" class="btn alt" type="button">SHOOT EACH OTHER: ' + (net.pvp ? 'ON' : 'OFF') + '</button>'
+      : '<p class="keys">Shooting each other: ' + (net.pvp ? 'on' : 'off') + '</p>') +
+    '<button id="leavebtn" class="btn alt" type="button">LEAVE ROOM</button>';
 }
 function renderLobby() { if (net.phase !== 'lobby' || !net.role) return; $('pbody').innerHTML = lobbyBody(); bindPanel(); }
-function broadcastLobby() { netBroadcast({ t: 'lobby', list: hostList() }); renderLobby(); }
+function broadcastLobby() { netBroadcast({ t: 'lobby', list: hostList(), pvp: net.pvp }); renderLobby(); }
 function showMpOver(res) {
   state = 'over'; releaseLock(); mouseFire = false; touchFire = false;
   const rows = res.slice().sort((a, b) => b.s - a.s).map(r => '<li><i class="sw" style="background:' + PCSS[r.id] + '"></i><div><b>P' + (r.id + 1) + (r.id === net.myId ? ' (you)' : '') + '</b><span>' + r.s + ' pts</span></div></li>').join('');
@@ -887,7 +970,7 @@ function netReset() {
   try { if (net.hostConn) net.hostConn.close(); } catch (e) {}
   try { if (net.peer) net.peer.destroy(); } catch (e) {}
   for (const id in net.players) removeRemote(id);
-  Object.assign(net, { role: null, phase: 'lobby', code: '', peer: null, hostConn: null, conns: {}, players: {}, lobby: [], myId: 0, t: 0, boardT: 0 });
+  Object.assign(net, { role: null, phase: 'lobby', code: '', peer: null, hostConn: null, conns: {}, players: {}, lobby: [], myId: 0, t: 0, boardT: 0, pvp: true });
   ghost = false;
   const b = $('board'); if (b) b.innerHTML = '';
 }
@@ -933,16 +1016,17 @@ function joinRoom(raw) {
 }
 function boardHtml() {
   if (!net.role) return '';
-  const rows = [{ id: net.myId, s: score, l: lives, a: !ghost }];
-  for (const id in net.players) { const p = net.players[id]; rows.push({ id: p.id, s: p.s, l: p.l, a: p.a }); }
+  const rows = [{ id: net.myId, s: score, l: lives, a: !ghost, h: hp }];
+  for (const id in net.players) { const p = net.players[id]; rows.push({ id: p.id, s: p.s, l: p.l, a: p.a, h: p.hp }); }
   rows.sort((a, b) => a.id - b.id);
-  return rows.map(r => '<div class="pl"><i class="sw" style="background:' + PCSS[r.id] + '"></i>P' + (r.id + 1) + ' ' + r.s + (r.a ? ' ' + '●'.repeat(Math.max(0, r.l)) : ' down') + '</div>').join('');
+  return rows.map(r => '<div class="pl"><i class="sw" style="background:' + PCSS[r.id] + '"></i>P' + (r.id + 1) + ' <span class="hpb"><i style="width:' + Math.max(0, Math.min(100, r.h)) + '%"></i></span> ' + r.s + (r.a ? ' ' + '●'.repeat(Math.max(0, r.l)) : ' down') + '</div>').join('');
 }
 function mpHtml() {
   return '<div class="mp"><span class="lbl">Co-op, 2 to 4 players</span><div class="mprow"><button id="hostbtn" class="btn alt" type="button">HOST ROOM</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Room code"><button id="joinbtn" class="btn alt" type="button">JOIN</button></div></div>';
 }
 function bindPanel() {
   const l = $('leavebtn'); if (l) l.onclick = leaveRoom;
+  const pv = $('pvpbtn'); if (pv) pv.onclick = () => { net.pvp = !net.pvp; broadcastLobby(); };
   const h = $('hostbtn'); if (h) h.onclick = () => { audioInit(); hostRoom(0); };
   const j = $('joinbtn'), c = $('code');
   if (j && c) {
@@ -955,7 +1039,8 @@ function bindPanel() {
 const el = {
   score: $('score'), level: $('level'), left: $('left'), ammo: $('ammo'), lives: $('lives'), fill: $('barfill'),
   guns: $('guns'), hurt: $('hurt'), cross: $('cross'), hud: $('hud'), panel: $('panel'), touch: $('touch'),
-  fire: $('fire'), stick: $('stick'), knob: $('knob'), snd: $('snd'), toast: $('toast')
+  fire: $('fire'), stick: $('stick'), knob: $('knob'), snd: $('snd'), toast: $('toast'),
+  hpwrap: $('hpwrap'), hpfill: $('hpfill'), hptext: $('hptext')
 };
 const hudCache = {};
 function setText(k, v) { if (hudCache[k] !== v) { hudCache[k] = v; el[k].textContent = v; } }
@@ -966,6 +1051,13 @@ function updateHud() {
   setText('ammo', String(ammo));
   el.ammo.classList.toggle('low', ammo <= 5);
   el.fill.style.width = ((1 - aliveDots / dotList.length) * 100).toFixed(1) + '%';
+  el.hpwrap.hidden = !net.role;
+  if (net.role) {
+    const f = Math.max(0, hp) / 100;
+    el.hpfill.style.width = (f * 100).toFixed(0) + '%';
+    el.hpfill.style.backgroundColor = 'hsl(' + Math.round(f * 120) + ',75%,50%)';
+    setText('hptext', ghost ? 'DOWN' : String(Math.max(0, Math.ceil(hp))));
+  }
 }
 function updateLives() {
   el.lives.innerHTML = '';
@@ -1219,7 +1311,7 @@ function step(dt) {
     for (const z of zombies) updateZombie(z, dt);
     if (invuln <= 0 && !ghost) {
       for (const z of zombies) {
-        if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - px, z.z - pz) < 1.5) { hurt(z); break; }
+        if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - px, z.z - pz) < 1.5) { if (net.role) takeDamage(25, -1, z); else hurt(z); break; }
       }
     }
     if (net.role === 'host') hostContact(dt);
@@ -1265,5 +1357,8 @@ try { best = +localStorage.getItem('dotslayer-best') || 0; } catch (e) {}
 window.addEventListener('touchstart', () => {}, { passive: true });
 buildChips(); updateLives(); buildGun(0); refreshChips(); resetActors(); resize(); showTitle();
 requestAnimationFrame(frame);
+
 })();
 </script>
+</body>
+</html>

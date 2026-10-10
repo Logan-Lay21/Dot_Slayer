@@ -1,0 +1,897 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Dot Slayer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Chakra+Petch:wght@500;600;700&display=swap">
+<style>
+/* Layout: full-bleed 3D view with the HUD pinned to the edges (score top-left, minimap top-right, ammo and guns bottom-center) and one centered card for title, pause and results. */
+:root{
+  --ink:#05060f; --panel:#080b24; --line:#2b3380; --wall:#4057ff;
+  --dot:#ffd84a; --blood:#ff3b4e; --pink:#ff7ac8; --cyan:#46e6ff; --orange:#ff9a2e;
+  --text:#eef1ff; --dim:#98a2e0;
+  --display:"Bungee","Impact","Arial Black",sans-serif;
+  --ui:"Chakra Petch","Segoe UI",system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ink);color:var(--text);font:600 15px/1.35 var(--ui);overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
+button{font-family:inherit}
+#app{position:relative;width:100%;height:100%;overflow:hidden;background:var(--ink)}
+#view{position:absolute;inset:0;width:100%;height:100%;display:block}
+#touch{position:absolute;inset:0;z-index:1}
+#hud{position:absolute;inset:0;z-index:2;pointer-events:none}
+.lbl{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);font-weight:700}
+
+#bar{position:absolute;top:0;left:0;right:0;height:4px;background:rgba(255,255,255,.08)}
+#barfill{display:block;height:100%;width:0;background:var(--dot)}
+.tl{position:absolute;top:16px;left:16px;display:flex;flex-direction:column;gap:6px}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat b{font:400 26px/1 var(--display);color:var(--text);font-variant-numeric:tabular-nums}
+.snd{position:absolute;top:14px;left:50%;transform:translateX(-50%);pointer-events:auto;font-size:10px;letter-spacing:.14em;font-weight:700;color:var(--dim);background:rgba(8,11,36,.8);border:1px solid var(--line);border-radius:999px;padding:6px 10px;cursor:pointer}
+.tr{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+#map{width:min(114px,28vw);height:auto;border:1px solid var(--line);border-radius:6px;background:rgba(5,6,15,.72)}
+#lives{display:flex;gap:6px}
+.pip{width:14px;height:14px;border-radius:50%;background:var(--blood);box-shadow:0 0 8px rgba(255,59,78,.6)}
+.pip.off{background:transparent;border:2px solid #4a2330;box-shadow:none}
+.bm{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px}
+#ammo{font:400 44px/1 var(--display);font-variant-numeric:tabular-nums;color:var(--dot)}
+#ammo.low{color:var(--blood);animation:blink .55s steps(2) infinite}
+@keyframes blink{50%{opacity:.35}}
+#guns{display:flex;gap:6px;pointer-events:auto;margin-top:2px}
+.gun{font-size:11px;line-height:1;font-weight:700;letter-spacing:.08em;color:var(--dim);background:rgba(8,11,36,.82);border:1px solid var(--line);border-radius:8px;padding:8px 9px;min-width:56px;cursor:pointer}
+.gun b{color:var(--text);margin-right:5px}
+.gun.on{border-color:var(--dot);color:var(--dot)}
+.gun.locked{opacity:.35;cursor:default}
+#cross{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border:2px solid rgba(255,255,255,.8);border-radius:50%;transition:transform .08s,border-color .08s}
+#cross::after{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px 0 0 -2px;background:var(--dot);border-radius:50%}
+#cross.hit{border-color:var(--blood);transform:scale(1.5)}
+#toast{position:absolute;left:50%;top:24%;transform:translateX(-50%);font:400 clamp(18px,5vw,26px)/1.1 var(--display);text-align:center;opacity:0;white-space:nowrap;text-shadow:0 2px 0 #000}
+#toast.show{animation:pop 1.9s ease-out}
+@keyframes pop{0%{opacity:0;transform:translate(-50%,10px) scale(.92)}12%{opacity:1;transform:translate(-50%,0) scale(1)}78%{opacity:1}100%{opacity:0}}
+#hurt{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 42%,rgba(255,40,60,.6));opacity:0;transition:opacity .6s}
+#hurt.on{opacity:1;transition:none}
+
+#stick{position:absolute;width:112px;height:112px;margin:-56px 0 0 -56px;border:2px solid rgba(255,255,255,.3);border-radius:50%;opacity:0;pointer-events:none}
+#stick.on{opacity:1}
+#knob{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(255,216,74,.55)}
+#fire{position:absolute;z-index:3;right:20px;bottom:20px;width:92px;height:92px;border-radius:50%;border:3px solid var(--blood);background:rgba(255,59,78,.25);color:var(--text);font:400 16px var(--display);letter-spacing:.06em;touch-action:none}
+#fire:active{background:rgba(255,59,78,.6)}
+
+.panel{position:absolute;z-index:5;left:50%;top:50%;transform:translate(-50%,-50%);width:min(560px,calc(100% - 32px));max-height:calc(100% - 32px);overflow:auto;background:rgba(7,9,28,.93);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:14px;touch-action:pan-y}
+.panel h1{font:400 clamp(32px,9vw,54px)/.95 var(--display);margin:0;color:var(--dot);text-wrap:balance}
+.sub{margin:0;font-size:16px;font-weight:500;max-width:46ch}
+.rules{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.rules li{position:relative;padding-left:20px;font-weight:500}
+.rules li::before{content:"";position:absolute;left:2px;top:.45em;width:9px;height:9px;border-radius:50%;background:var(--dot)}
+.roster{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:0;padding:0;list-style:none}
+.roster li{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.03)}
+.sw{width:12px;height:12px;border-radius:3px;flex:none}
+.roster b{display:block;font-size:14px;letter-spacing:.06em}
+.roster span{font-size:12px;color:var(--dim);font-weight:500}
+.keys{margin:0;font-size:13px;color:var(--dim);font-weight:500}
+.stats{display:flex;gap:24px;flex-wrap:wrap}
+.btn{align-self:flex-start;font:400 20px/1 var(--display);letter-spacing:.04em;color:#161200;background:var(--dot);border:0;border-radius:10px;padding:14px 26px;cursor:pointer}
+.btn:hover{filter:brightness(1.08)}
+.btn:focus-visible,.gun:focus-visible,.snd:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+@media (prefers-reduced-motion:reduce){#ammo.low{animation:none}}
+</style>
+
+<div id="app">
+  <canvas id="view"></canvas>
+  <div id="touch" hidden><div id="stick"><i id="knob"></i></div></div>
+  <div id="hud" hidden>
+    <div id="bar"><i id="barfill"></i></div>
+    <div class="tl">
+      <div class="stat"><span class="lbl">Score</span><b id="score">000000</b></div>
+      <div class="stat"><span class="lbl">Level</span><b id="level">1</b></div>
+      <span class="lbl" id="left"></span>
+    </div>
+    <button id="snd" class="snd" type="button" aria-label="Toggle sound">SOUND ON</button>
+    <div class="tr"><canvas id="map" width="114" height="126"></canvas><div id="lives" aria-label="Lives left"></div></div>
+    <div id="cross"></div>
+    <div id="toast" role="status"></div>
+    <div class="bm"><div id="ammo">0</div><span class="lbl">Ammo</span><div id="guns"></div></div>
+    <div id="hurt"></div>
+  </div>
+  <button id="fire" type="button" hidden>FIRE</button>
+  <section id="panel" class="panel" role="dialog" aria-labelledby="ptitle">
+    <h1 id="ptitle">Dot Slayer</h1>
+    <p id="psub" class="sub"></p>
+    <div id="pbody"></div>
+    <button id="pbtn" class="btn" type="button">Play</button>
+  </section>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const hasFinePointer = !!(window.matchMedia && matchMedia('(any-pointer: fine)').matches);
+const isTouch = (window.matchMedia && matchMedia('(pointer: coarse)').matches) || ('ontouchstart' in window && !hasFinePointer);
+
+/* Maze legend: # wall, . dot (ammo), o big dot (gun upgrade), G zombie start, P player start.
+   The zombie pen is the 3-cell room on row 9 plus its door on row 8. */
+const MAZE = [
+  '###################',
+  '#........#........#',
+  '#o##.###.#.###.##o#',
+  '#.................#',
+  '#.##.#.#####.#.##.#',
+  '#....#...#...#....#',
+  '####.### # ###.####',
+  '####.#   G   #.####',
+  '####.# ## ## #.####',
+  '####...#GGG#...####',
+  '####.# ##### #.####',
+  '####.#       #.####',
+  '####.# ##### #.####',
+  '#........#........#',
+  '#.##.###.#.###.##.#',
+  '#o.#.....P.....#.o#',
+  '##.#.#.#####.#.#.##',
+  '#....#...#...#....#',
+  '#.######.#.######.#',
+  '#.................#',
+  '###################'
+];
+const ROWS = MAZE.length, COLS = MAZE[0].length, CS = 4, WALL_H = 3.4, EYE = 1.65;
+const walls = [], dotAt = [], SPAWNS = [], dotList = [];
+let playerStart = { c: 9, r: 15 };
+for (let r = 0; r < ROWS; r++) {
+  walls.push([]); dotAt.push([]);
+  for (let c = 0; c < COLS; c++) {
+    const ch = MAZE[r][c];
+    walls[r][c] = ch === '#';
+    dotAt[r][c] = null;
+    if (ch === '.' || ch === 'o') {
+      const d = { c, r, big: ch === 'o', alive: true, idx: -1, mesh: null };
+      dotAt[r][c] = d; dotList.push(d);
+    }
+    if (ch === 'G') SPAWNS.push({ c, r });
+    if (ch === 'P') playerStart = { c, r };
+  }
+}
+const isPen = (c, r) => (r === 9 && c >= 8 && c <= 10) || (r === 8 && c === 9);
+function wallAt(x, z) {
+  const c = Math.floor(x / CS), r = Math.floor(z / CS);
+  return c < 0 || r < 0 || c >= COLS || r >= ROWS || walls[r][c];
+}
+function solidAt(x, z) {
+  const c = Math.floor(x / CS), r = Math.floor(z / CS);
+  return c < 0 || r < 0 || c >= COLS || r >= ROWS || walls[r][c] || isPen(c, r);
+}
+
+/* ---------- renderer, scene, lights ---------- */
+const canvas = $('view'), app = $('app');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.autoClear = false;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060f);
+scene.fog = new THREE.Fog(0x05060f, 8, 44);
+const camera = new THREE.PerspectiveCamera(78, 1, 0.1, 100);
+camera.rotation.order = 'YXZ';
+scene.add(camera);
+scene.add(new THREE.AmbientLight(0x7080d0, 0.75));
+const lamp = new THREE.PointLight(0xdfe6ff, 1.0, 28, 1.4);
+camera.add(lamp);
+const flashLight = new THREE.PointLight(0xffa040, 0, 14, 1.5);
+flashLight.position.set(0.3, -0.2, -1.2);
+camera.add(flashLight);
+
+function canvasTex(w, h, draw, rx, ry) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (rx) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); }
+  t.anisotropy = 4;
+  return t;
+}
+const wallTex = canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#070b33'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#4057ff'; g.lineWidth = 7; g.strokeRect(4, 4, w - 8, h - 8);
+  g.strokeStyle = 'rgba(110,130,255,.35)'; g.lineWidth = 2; g.strokeRect(20, 20, w - 40, h - 40);
+});
+const floorTex = canvasTex(64, 64, (g, w, h) => {
+  g.fillStyle = '#090b1c'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#171d4d'; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
+}, COLS, ROWS);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(COLS * CS, ROWS * CS), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
+floor.rotation.x = -Math.PI / 2; floor.position.set(COLS * CS / 2, 0, ROWS * CS / 2); scene.add(floor);
+const ceil = new THREE.Mesh(new THREE.PlaneGeometry(COLS * CS, ROWS * CS), new THREE.MeshBasicMaterial({ color: 0x04050d }));
+ceil.rotation.x = Math.PI / 2; ceil.position.set(COLS * CS / 2, WALL_H, ROWS * CS / 2); scene.add(ceil);
+
+const wallCells = [];
+for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (walls[r][c]) wallCells.push([c, r]);
+const wallMesh = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(CS, WALL_H, CS),
+  new THREE.MeshStandardMaterial({ map: wallTex, emissiveMap: wallTex, emissive: 0xffffff, emissiveIntensity: 0.85, roughness: 0.7 }),
+  wallCells.length
+);
+const m4 = new THREE.Matrix4();
+wallCells.forEach(([c, r], i) => { m4.makeTranslation((c + 0.5) * CS, WALL_H / 2, (r + 0.5) * CS); wallMesh.setMatrixAt(i, m4); });
+wallMesh.frustumCulled = false;
+scene.add(wallMesh);
+
+/* pen door bars */
+const gateMat = new THREE.MeshBasicMaterial({ color: 0xff7ac8 });
+[0.9, 1.7, 2.5].forEach(y => {
+  const b = new THREE.Mesh(new THREE.BoxGeometry(CS * 0.9, 0.12, 0.12), gateMat);
+  b.position.set(9.5 * CS, y, 8.5 * CS); scene.add(b);
+});
+
+/* ---------- dots ---------- */
+const smalls = dotList.filter(d => !d.big), bigs = dotList.filter(d => d.big);
+const dotMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffd84a }), smalls.length);
+dotMesh.frustumCulled = false;
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+function placeDot(d) { m4.makeTranslation((d.c + 0.5) * CS, 1.0, (d.r + 0.5) * CS); dotMesh.setMatrixAt(d.idx, m4); }
+smalls.forEach((d, i) => { d.idx = i; placeDot(d); });
+dotMesh.instanceMatrix.needsUpdate = true;
+scene.add(dotMesh);
+bigs.forEach(d => {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), new THREE.MeshBasicMaterial({ color: 0xfff3b0 })));
+  const cage = new THREE.Mesh(new THREE.OctahedronGeometry(0.95, 0), new THREE.MeshBasicMaterial({ color: 0xffd84a, wireframe: true }));
+  g.add(cage); g.userData.cage = cage;
+  g.position.set((d.c + 0.5) * CS, 1.3, (d.r + 0.5) * CS);
+  scene.add(g); d.mesh = g;
+});
+
+/* ---------- weapons ---------- */
+const WEAPONS = [
+  { name: 'PISTOL', short: 'PISTOL', dmg: 1, cd: 0.4, cost: 1, pellets: 1, spread: 0, pierce: false, color: 0xdfe6ff, stun: 0.35 },
+  { name: 'SMG', short: 'SMG', dmg: 1, cd: 0.1, cost: 1, pellets: 1, spread: 0.018, pierce: false, color: 0xffd84a, stun: 0.2 },
+  { name: 'SHOTGUN', short: 'SHOTGUN', dmg: 1, cd: 0.72, cost: 2, pellets: 8, spread: 0.07, pierce: false, color: 0xff9a2e, stun: 0.5 },
+  { name: 'RAIL CANNON', short: 'RAIL', dmg: 6, cd: 0.6, cost: 3, pellets: 1, spread: 0, pierce: true, color: 0x46e6ff, stun: 0.9 }
+];
+
+/* gun viewmodel lives in its own scene so it never clips into walls */
+const gunScene = new THREE.Scene();
+const gunCam = new THREE.PerspectiveCamera(60, 1, 0.05, 10);
+gunScene.add(new THREE.AmbientLight(0xaab4ff, 0.9));
+const gunSun = new THREE.DirectionalLight(0xffffff, 0.9);
+gunSun.position.set(1, 2, 2); gunScene.add(gunSun);
+const gunRoot = new THREE.Group();
+gunRoot.position.set(0.34, -0.32, -0.62);
+gunScene.add(gunRoot);
+const gunMats = {
+  body: new THREE.MeshStandardMaterial({ color: 0x252a52, roughness: 0.5, metalness: 0.4 }),
+  accent: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1 }),
+  skin: new THREE.MeshStandardMaterial({ color: 0xd9a37c, roughness: 0.8 }),
+  sleeve: new THREE.MeshStandardMaterial({ color: 0x3a1f6b, roughness: 0.9 })
+};
+const muzzleFlash = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.02), new THREE.MeshBasicMaterial({ color: 0xffe08a }));
+muzzleFlash.visible = false;
+function gbox(w, h, d, mat, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z); gunRoot.add(m); return m;
+}
+function buildGun(i) {
+  while (gunRoot.children.length) gunRoot.remove(gunRoot.children[0]);
+  const w = WEAPONS[i], B = gunMats.body, A = gunMats.accent;
+  A.color.setHex(w.color); A.emissive.setHex(w.color);
+  gbox(0.14, 0.14, 0.55, gunMats.sleeve, 0.02, -0.2, 0.34);
+  gbox(0.1, 0.1, 0.14, gunMats.skin, 0, -0.1, 0.04);
+  let mz = -0.3;
+  if (i === 0) {
+    gbox(0.08, 0.1, 0.36, B, 0, 0, -0.1); gbox(0.085, 0.02, 0.2, A, 0, 0.06, -0.15); gbox(0.07, 0.16, 0.09, B, 0, -0.12, 0.02);
+  } else if (i === 1) {
+    gbox(0.09, 0.13, 0.5, B, 0, 0, -0.12); gbox(0.04, 0.04, 0.25, B, 0, 0.02, -0.4); gbox(0.06, 0.22, 0.08, B, 0, -0.17, 0.0); gbox(0.095, 0.02, 0.3, A, 0, 0.075, -0.15); mz = -0.53;
+  } else if (i === 2) {
+    gbox(0.11, 0.1, 0.5, B, 0, 0, -0.05); gbox(0.05, 0.05, 0.7, B, -0.03, 0.05, -0.35); gbox(0.05, 0.05, 0.7, B, 0.03, 0.05, -0.35);
+    gbox(0.13, 0.08, 0.2, A, 0, -0.06, -0.25); mz = -0.72;
+  } else {
+    gbox(0.12, 0.14, 0.7, B, 0, 0, -0.2);
+    gbox(0.2, 0.2, 0.04, A, 0, 0, -0.1); gbox(0.2, 0.2, 0.04, A, 0, 0, -0.3); gbox(0.2, 0.2, 0.04, A, 0, 0, -0.5);
+    gbox(0.05, 0.05, 0.3, B, 0, 0, -0.65); mz = -0.82;
+  }
+  muzzleFlash.position.set(0, 0.02, mz - 0.05);
+  gunRoot.add(muzzleFlash);
+}
+
+/* ---------- particles and tracers ---------- */
+const PART = [], pGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
+for (let i = 0; i < 56; i++) {
+  const m = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  m.visible = false; scene.add(m); PART.push({ m, vx: 0, vy: 0, vz: 0, life: 0 });
+}
+let partI = 0;
+function burst(x, y, z, color, n, spd) {
+  for (let k = 0; k < n; k++) {
+    const p = PART[partI++ % PART.length];
+    p.m.material.color.setHex(color); p.m.position.set(x, y, z);
+    p.vx = (Math.random() - 0.5) * spd; p.vy = Math.random() * spd * 0.8 + 1; p.vz = (Math.random() - 0.5) * spd;
+    p.life = 0.6 + Math.random() * 0.4; p.m.visible = true;
+  }
+}
+function updateParticles(dt) {
+  for (const p of PART) {
+    if (p.life <= 0) continue;
+    p.life -= dt; p.vy -= 14 * dt;
+    p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+    if (p.m.position.y < 0.07) { p.m.position.y = 0.07; p.vy = 0; p.vx *= 0.7; p.vz *= 0.7; }
+    if (p.life <= 0) p.m.visible = false;
+  }
+}
+const TR = [], trGeo = new THREE.BoxGeometry(1, 1, 1);
+for (let i = 0; i < 20; i++) {
+  const m = new THREE.Mesh(trGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1, fog: false }));
+  m.visible = false; scene.add(m); TR.push({ m, life: 0, max: 0.1 });
+}
+let trI = 0;
+function tracer(a, b, color, width) {
+  const t = TR[trI++ % TR.length];
+  t.m.position.copy(a).add(b).multiplyScalar(0.5);
+  t.m.scale.set(width, width, Math.max(0.01, a.distanceTo(b)));
+  t.m.lookAt(b);
+  t.m.material.color.setHex(color); t.m.material.opacity = 1;
+  t.life = t.max = 0.09; t.m.visible = true;
+}
+function updateTracers(dt) {
+  for (const t of TR) {
+    if (t.life <= 0) continue;
+    t.life -= dt; t.m.material.opacity = Math.max(0, t.life / t.max);
+    if (t.life <= 0) t.m.visible = false;
+  }
+}
+
+/* ---------- audio ---------- */
+let actx = null, muted = false, wakaFlip = false;
+function audioInit() {
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } }
+  if (actx && actx.state === 'suspended') { try { actx.resume(); } catch (e) {} }
+}
+function tone(f, d, type, v, slide) {
+  if (muted || !actx) return;
+  try {
+    const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'square'; o.frequency.setValueAtTime(f, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t + d);
+    g.gain.setValueAtTime(v || 0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + d + 0.02);
+  } catch (e) {}
+}
+function noise(d, v) {
+  if (muted || !actx) return;
+  try {
+    const n = Math.floor(actx.sampleRate * d), b = actx.createBuffer(1, n, actx.sampleRate), a = b.getChannelData(0);
+    for (let i = 0; i < n; i++) a[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const s = actx.createBufferSource(), g = actx.createGain();
+    s.buffer = b; g.gain.value = v || 0.1; s.connect(g); g.connect(actx.destination); s.start();
+  } catch (e) {}
+}
+
+/* ---------- game state ---------- */
+let state = 'title', score = 0, level = 1, lives = 3, ammo = 16, tier = 0, wIdx = 0, best = 0;
+let px = 0, pz = 0, yaw = Math.PI / 2, pitch = 0, invuln = 0, fireCd = 0, kick = 0, flashT = 0, bobT = 0, bobY = 0;
+let aliveDots = dotList.length, scatter = true, modeT = 0, lastT = performance.now();
+const keys = {}, stick = { x: 0, y: 0 };
+let mouseFire = false, touchFire = false, queued = false, locked = false, hadLock = false;
+const zSpeed = () => Math.min(6.4, 4.2 + 0.4 * (level - 1));
+
+/* ---------- zombies ---------- */
+const ZDEF = [
+  { name: 'ROTTER', role: 'chases you', color: 0xff3b4e, css: '#ff3b4e', scatter: [17, 1] },
+  { name: 'GNASH', role: 'cuts you off', color: 0xff7ac8, css: '#ff7ac8', scatter: [1, 1] },
+  { name: 'MOLD', role: 'flanks you', color: 0x46e6ff, css: '#46e6ff', scatter: [17, 19] },
+  { name: 'LIMP', role: 'shy up close', color: 0xff9a2e, css: '#ff9a2e', scatter: [1, 19] }
+];
+function makeZombie(def, i) {
+  const g = new THREE.Group(); g.rotation.order = 'YXZ';
+  const skin = new THREE.MeshStandardMaterial({ color: 0x8fae86, roughness: 0.9, flatShading: true, emissive: 0xffffff, emissiveIntensity: 0 });
+  const cloth = new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.8, flatShading: true, emissive: def.color, emissiveIntensity: 0.35 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x16182e, roughness: 0.9, flatShading: true });
+  const eye = new THREE.MeshBasicMaterial({ color: def.color });
+  const part = (w, h, d, mat, x, y, z, parent) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); (parent || g).add(m); return m;
+  };
+  const legs = [-1, 1].map(s => { const p = new THREE.Group(); p.position.set(s * 0.2, 0.95, 0); g.add(p); part(0.32, 0.95, 0.32, dark, 0, -0.475, 0, p); return p; });
+  part(0.85, 0.95, 0.45, cloth, 0, 1.45, 0);
+  part(0.56, 0.56, 0.56, skin, 0, 2.2, 0);
+  part(0.13, 0.1, 0.05, eye, -0.14, 2.26, -0.29); part(0.13, 0.1, 0.05, eye, 0.14, 2.26, -0.29);
+  part(0.3, 0.07, 0.05, dark, 0, 2.08, -0.29);
+  const arms = [-1, 1].map(s => { const p = new THREE.Group(); p.position.set(s * 0.58, 1.85, 0); p.rotation.x = Math.PI / 2; g.add(p); part(0.24, 0.85, 0.24, skin, 0, -0.42, 0, p); return p; });
+  const bar = new THREE.Group(); bar.position.y = 3.0; g.add(bar);
+  bar.add(new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.14), new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0.7 })));
+  const fg = new THREE.PlaneGeometry(1.2, 0.14); fg.translate(0.6, 0, 0);
+  const fill = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: def.color, side: THREE.DoubleSide }));
+  fill.position.set(-0.6, 0, 0.01); bar.add(fill);
+  scene.add(g);
+  return { i, def, mesh: g, legs, arms, skin, cloth, bar, fill, hp: 3, maxHp: 3, state: 'house', x: 0, z: 0, c: 0, r: 0, nc: 0, nr: 0, dir: [0, 0], tc: 0, tr: 0, timer: 0, slow: 0, flashT: 0, anim: Math.random() * 6, deadT: 0, respawn: 0, rot: 0 };
+}
+const zombies = ZDEF.map(makeZombie);
+
+function setFlash(z, on) {
+  z.cloth.emissive.setHex(on ? 0xffffff : z.def.color);
+  z.cloth.emissiveIntensity = on ? 1 : 0.35;
+  z.skin.emissiveIntensity = on ? 0.9 : 0;
+}
+function placeZombie(z, idx, delay) {
+  const s = SPAWNS[idx];
+  z.c = z.nc = s.c; z.r = z.nr = s.r; z.x = (s.c + 0.5) * CS; z.z = (s.r + 0.5) * CS;
+  z.dir = [0, 0]; z.state = 'house'; z.timer = delay; z.slow = 0; z.deadT = 0;
+  z.hp = z.maxHp = 3 + (level - 1);
+  z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.set(z.x, 0, z.z);
+  z.fill.scale.x = 1; z.flashT = 0; z.bar.visible = false; setFlash(z, false);
+}
+function animLimbs(z, amp) {
+  const s = Math.sin(z.anim * 3) * 0.7 * amp;
+  z.legs[0].rotation.x = s; z.legs[1].rotation.x = -s;
+  z.arms[0].rotation.x = Math.PI / 2 + Math.sin(z.anim * 3 + 1) * 0.12;
+  z.arms[1].rotation.x = Math.PI / 2 - Math.sin(z.anim * 3 + 1) * 0.12;
+}
+function facingDir() {
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+  return Math.abs(fx) > Math.abs(fz) ? [Math.sign(fx), 0] : [0, Math.sign(fz)];
+}
+/* Each zombie picks a target cell; at every junction it takes the open direction that ends up closest to it. */
+function setTarget(z) {
+  const pc = Math.floor(px / CS), pr = Math.floor(pz / CS);
+  if (z.state === 'leaving') { z.tc = 9; z.tr = 7; return; }
+  if (scatter) { z.tc = z.def.scatter[0]; z.tr = z.def.scatter[1]; return; }
+  const f = facingDir();
+  if (z.i === 0) { z.tc = pc; z.tr = pr; }
+  else if (z.i === 1) { z.tc = pc + f[0] * 4; z.tr = pr + f[1] * 4; }
+  else if (z.i === 2) { z.tc = 2 * (pc + f[0] * 2) - zombies[0].c; z.tr = 2 * (pr + f[1] * 2) - zombies[0].r; }
+  else {
+    if (Math.hypot(pc - z.c, pr - z.r) > 8) { z.tc = pc; z.tr = pr; }
+    else { z.tc = z.def.scatter[0]; z.tr = z.def.scatter[1]; }
+  }
+}
+function blockedFor(z, c, r) {
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS || walls[r][c]) return true;
+  return z.state === 'active' && isPen(c, r);
+}
+const DIRS = [[0, -1], [-1, 0], [0, 1], [1, 0]];
+function chooseNext(z) {
+  let best = null, bd = 1e9;
+  const still = z.dir[0] === 0 && z.dir[1] === 0;
+  for (const d of DIRS) {
+    if (!still && d[0] === -z.dir[0] && d[1] === -z.dir[1]) continue;
+    const nc = z.c + d[0], nr = z.r + d[1];
+    if (blockedFor(z, nc, nr)) continue;
+    const dd = (nc - z.tc) * (nc - z.tc) + (nr - z.tr) * (nr - z.tr);
+    if (dd < bd) { bd = dd; best = d; }
+  }
+  if (!best) best = [-z.dir[0], -z.dir[1]];
+  z.dir = best; z.nc = z.c + best[0]; z.nr = z.r + best[1];
+}
+function updateZombie(z, dt) {
+  const m = z.mesh;
+  if (z.flashT > 0) { z.flashT -= dt; if (z.flashT <= 0) setFlash(z, false); }
+  if (z.state === 'dead') {
+    z.deadT += dt;
+    m.rotation.x = Math.min(1, z.deadT / 0.45) * Math.PI / 2;
+    m.position.y = -Math.max(0, z.deadT - 0.9) * 1.2;
+    z.bar.visible = false;
+    if (z.deadT > 1.6) m.visible = false;
+    z.respawn -= dt;
+    if (z.respawn <= 0) placeZombie(z, 2, 2.5);
+    return;
+  }
+  if (z.state === 'house') {
+    z.timer -= dt; z.anim += dt * 2;
+    m.position.set(z.x, Math.sin(z.anim * 2) * 0.05, z.z); animLimbs(z, 0.4);
+    if (z.timer <= 0) { z.state = z.r <= 7 ? 'active' : 'leaving'; setTarget(z); chooseNext(z); }
+    return;
+  }
+  const sp = zSpeed() * (z.slow > 0 ? 0.4 : 1);
+  z.slow = Math.max(0, z.slow - dt);
+  let step = sp * dt, guard = 0;
+  while (step > 0 && guard++ < 4) {
+    const tx = (z.nc + 0.5) * CS, tz = (z.nr + 0.5) * CS, dx = tx - z.x, dz = tz - z.z, d = Math.hypot(dx, dz);
+    if (d <= step) {
+      z.x = tx; z.z = tz; step -= d; z.c = z.nc; z.r = z.nr;
+      if (z.state === 'leaving' && z.r <= 7) z.state = 'active';
+      setTarget(z); chooseNext(z);
+    } else { z.x += dx / d * step; z.z += dz / d * step; step = 0; }
+  }
+  const want = Math.atan2(-z.dir[0], -z.dir[1]);
+  let diff = want - z.rot; diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  z.rot += diff * Math.min(1, dt * 10);
+  m.rotation.y = z.rot; m.position.set(z.x, 0, z.z);
+  z.anim += dt * sp * 1.6; animLimbs(z, 1);
+  z.bar.visible = z.hp < z.maxHp;
+  if (z.bar.visible) z.bar.rotation.y = Math.atan2(px - z.x, pz - z.z) - z.rot;
+}
+
+/* ---------- shooting ---------- */
+const _o = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3(), _m = new THREE.Vector3();
+function aimDir(out, sx, sy) {
+  const y = yaw + sx, p = pitch + sy, cp = Math.cos(p);
+  return out.set(-Math.sin(y) * cp, Math.sin(p), -Math.cos(y) * cp);
+}
+function wallDist(o, d, max) {
+  for (let t = 0.4; t < max; t += 0.4) {
+    const y = o.y + d.y * t;
+    if (y < 0 || y > WALL_H) return t;
+    if (wallAt(o.x + d.x * t, o.z + d.z * t)) return t;
+  }
+  return max;
+}
+function hitZombie(z, w) {
+  z.hp -= w.dmg; z.flashT = 0.1; setFlash(z, true);
+  z.slow = Math.max(z.slow, w.stun);
+  z.fill.scale.x = Math.max(0.001, z.hp / z.maxHp);
+  burst(z.x, 1.4, z.z, z.def.color, 3, 3);
+  el.cross.classList.add('hit'); setTimeout(() => el.cross.classList.remove('hit'), 90);
+  if (z.hp <= 0) killZombie(z); else tone(180, 0.06, 'square', 0.04);
+}
+function killZombie(z) {
+  z.state = 'dead'; z.deadT = 0; z.respawn = 6; z.bar.visible = false;
+  score += 200 * level;
+  burst(z.x, 1.3, z.z, z.def.color, 10, 6); burst(z.x, 1.3, z.z, 0x8fae86, 8, 5);
+  tone(260, 0.3, 'sawtooth', 0.07, -200); noise(0.18, 0.08);
+}
+function fire() {
+  const w = WEAPONS[wIdx];
+  if (fireCd > 0 || state !== 'play') return;
+  if (ammo < w.cost) {
+    fireCd = 0.3; tone(120, 0.08, 'square', 0.05);
+    if (ammo <= 0) toast('OUT OF AMMO. EAT DOTS!', '#ff3b4e');
+    return;
+  }
+  ammo -= w.cost; fireCd = w.cd; kick = 1; flashT = 0.06;
+  _o.set(px, EYE, pz);
+  _m.set(px + Math.cos(yaw) * 0.3 - Math.sin(yaw) * 0.8, EYE - 0.25, pz - Math.sin(yaw) * 0.3 - Math.cos(yaw) * 0.8);
+  const radius = 0.9 + (isTouch ? 0.35 : 0.15);
+  for (let k = 0; k < w.pellets; k++) {
+    aimDir(_d, (Math.random() - 0.5) * 2 * w.spread, (Math.random() - 0.5) * 2 * w.spread);
+    const reach = wallDist(_o, _d, 60), hits = [];
+    for (const z of zombies) {
+      if (z.state !== 'active' && z.state !== 'leaving') continue;
+      _e.set(z.x - _o.x, 1.2 - _o.y, z.z - _o.z);
+      const t = _e.dot(_d);
+      if (t < 0 || t > reach) continue;
+      const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
+      if (Math.sqrt(ex * ex + ey * ey + ez * ez) < radius) hits.push({ z, t });
+    }
+    hits.sort((a, b) => a.t - b.t);
+    const list = w.pierce ? hits : hits.slice(0, 1);
+    let end = reach;
+    if (!w.pierce && list.length) end = list[0].t;
+    list.forEach(h => hitZombie(h.z, w));
+    _e.copy(_o).addScaledVector(_d, end);
+    tracer(_m, _e, w.color, w.pierce ? 0.12 : 0.035);
+  }
+  if (wIdx === 3) { tone(900, 0.25, 'sawtooth', 0.06, -700); noise(0.12, 0.08); }
+  else if (wIdx === 2) { noise(0.2, 0.16); tone(140, 0.15, 'square', 0.07, -60); }
+  else { noise(0.07, 0.09); tone(520 - wIdx * 80, 0.07, 'square', 0.04, -300); }
+}
+
+/* ---------- player ---------- */
+function blockedP(x, z, r) { return solidAt(x - r, z - r) || solidAt(x + r, z - r) || solidAt(x - r, z + r) || solidAt(x + r, z + r); }
+function movePlayer(dt) {
+  let fwd = 0, str = 0;
+  if (keys.KeyW || keys.ArrowUp) fwd += 1;
+  if (keys.KeyS || keys.ArrowDown) fwd -= 1;
+  if (keys.KeyD) str += 1;
+  if (keys.KeyA) str -= 1;
+  if (keys.ArrowLeft || keys.KeyQ) yaw += 2.2 * dt;
+  if (keys.ArrowRight || keys.KeyE) yaw -= 2.2 * dt;
+  fwd -= stick.y; str += stick.x;
+  const len = Math.hypot(fwd, str);
+  if (len > 1) { fwd /= len; str /= len; }
+  const sx = Math.sin(yaw), cx = Math.cos(yaw), sp = 6.6 * dt, R = 0.95;
+  const vx = (-sx * fwd + cx * str) * sp, vz = (-cx * fwd - sx * str) * sp;
+  if (!blockedP(px + vx, pz, R)) px += vx;
+  if (!blockedP(px, pz + vz, R)) pz += vz;
+  const moving = len > 0.05;
+  bobT += dt * (moving ? 9 : 0);
+  bobY = moving ? Math.sin(bobT) * 0.05 : bobY * 0.8;
+}
+function collectDots() {
+  const pc = Math.floor(px / CS), pr = Math.floor(pz / CS);
+  for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+    const c = pc + dc, r = pr + dr;
+    if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
+    const d = dotAt[r][c];
+    if (!d || !d.alive) continue;
+    const dx = px - (c + 0.5) * CS, dz = pz - (r + 0.5) * CS;
+    if (dx * dx + dz * dz > 3.4) continue;
+    d.alive = false; aliveDots--;
+    if (d.big) {
+      d.mesh.visible = false; score += 50; ammo = Math.min(99, ammo + 12);
+      if (tier < WEAPONS.length - 1) {
+        tier++; selectWeapon(tier, true);
+        toast(WEAPONS[tier].name + ' ACQUIRED', '#' + WEAPONS[tier].color.toString(16).padStart(6, '0'));
+      } else toast('MAX GUN. +12 AMMO', '#ffd84a');
+      [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, 0.12, 'square', 0.05), i * 70));
+    } else {
+      dotMesh.setMatrixAt(d.idx, ZERO); dotMesh.instanceMatrix.needsUpdate = true;
+      score += 10; ammo = Math.min(99, ammo + 2);
+      wakaFlip = !wakaFlip; tone(wakaFlip ? 440 : 560, 0.06, 'square', 0.035);
+    }
+  }
+}
+
+/* ---------- HUD ---------- */
+const el = {
+  score: $('score'), level: $('level'), left: $('left'), ammo: $('ammo'), lives: $('lives'), fill: $('barfill'),
+  guns: $('guns'), hurt: $('hurt'), cross: $('cross'), hud: $('hud'), panel: $('panel'), touch: $('touch'),
+  fire: $('fire'), stick: $('stick'), knob: $('knob'), snd: $('snd'), toast: $('toast')
+};
+const hudCache = {};
+function setText(k, v) { if (hudCache[k] !== v) { hudCache[k] = v; el[k].textContent = v; } }
+function updateHud() {
+  setText('score', String(score).padStart(6, '0'));
+  setText('level', String(level));
+  setText('left', aliveDots + ' DOTS LEFT');
+  setText('ammo', String(ammo));
+  el.ammo.classList.toggle('low', ammo <= 5);
+  el.fill.style.width = ((1 - aliveDots / dotList.length) * 100).toFixed(1) + '%';
+}
+function updateLives() {
+  el.lives.innerHTML = '';
+  for (let i = 0; i < 3; i++) { const p = document.createElement('i'); p.className = 'pip' + (i < lives ? '' : ' off'); el.lives.appendChild(p); }
+}
+function buildChips() {
+  el.guns.innerHTML = '';
+  WEAPONS.forEach((w, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'gun'; b.innerHTML = '<b>' + (i + 1) + '</b>' + w.short;
+    b.addEventListener('click', () => selectWeapon(i));
+    el.guns.appendChild(b);
+  });
+}
+function refreshChips() {
+  [...el.guns.children].forEach((b, i) => { b.classList.toggle('on', i === wIdx); b.classList.toggle('locked', i > tier); });
+}
+function selectWeapon(i, silent) {
+  if (i > tier || i < 0) return;
+  wIdx = i; buildGun(i); refreshChips(); fireCd = Math.max(fireCd, 0.15);
+  if (!silent) tone(300, 0.05, 'square', 0.03);
+}
+function toast(t, color) {
+  el.toast.textContent = t; el.toast.style.color = color || '#ffd84a';
+  el.toast.classList.remove('show'); void el.toast.offsetWidth; el.toast.classList.add('show');
+}
+
+/* minimap */
+const mapC = $('map'), mg = mapC.getContext('2d'), MS = 6;
+mapC.width = COLS * MS; mapC.height = ROWS * MS;
+const mapBase = document.createElement('canvas');
+mapBase.width = COLS * MS; mapBase.height = ROWS * MS;
+(() => {
+  const g = mapBase.getContext('2d');
+  g.fillStyle = '#080b24'; g.fillRect(0, 0, mapBase.width, mapBase.height);
+  g.fillStyle = '#4057ff';
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (walls[r][c]) g.fillRect(c * MS, r * MS, MS, MS);
+})();
+function drawMap() {
+  mg.drawImage(mapBase, 0, 0);
+  mg.fillStyle = '#ffd84a';
+  for (const d of dotList) if (d.alive) { if (d.big) mg.fillRect(d.c * MS + 1, d.r * MS + 1, 4, 4); else mg.fillRect(d.c * MS + 2, d.r * MS + 2, 2, 2); }
+  for (const z of zombies) {
+    if (z.state === 'dead') continue;
+    mg.fillStyle = z.def.css; mg.beginPath(); mg.arc(z.x / CS * MS, z.z / CS * MS, 2.6, 0, 6.283); mg.fill();
+  }
+  mg.save(); mg.translate(px / CS * MS, pz / CS * MS); mg.rotate(-yaw);
+  mg.fillStyle = '#ffffff'; mg.beginPath(); mg.moveTo(0, -4.5); mg.lineTo(3.4, 3.4); mg.lineTo(-3.4, 3.4); mg.closePath(); mg.fill();
+  mg.restore();
+}
+
+/* ---------- panels ---------- */
+function panel(title, sub, body, btn, handler) {
+  $('ptitle').textContent = title; $('psub').textContent = sub; $('pbody').innerHTML = body;
+  const b = $('pbtn'); b.textContent = btn; b.onclick = handler;
+  el.panel.hidden = false; try { b.focus({ preventScroll: true }); } catch (e) {}
+}
+const rulesHtml = () => '<ul class="rules"><li>Walk over dots to collect them. Every dot is ammo.</li><li>Big dots upgrade your gun: pistol, SMG, shotgun, rail cannon.</li><li>Four zombies hunt you, each in its own way. Eat every dot to clear the level.</li></ul>';
+const rosterHtml = () => '<ul class="roster">' + ZDEF.map(z => '<li><i class="sw" style="background:' + z.css + '"></i><div><b>' + z.name + '</b><span>' + z.role + '</span></div></li>').join('') + '</ul>';
+const controlsHtml = () => isTouch
+  ? '<p class="keys">Left thumb moves. Right thumb looks. FIRE shoots. Tap a gun chip to switch.</p>'
+  : '<p class="keys">WASD move, mouse look, click or Space to fire, 1 to 4 switch gun, M mute, Esc pause. If the mouse will not lock, drag to look.</p>';
+function showTitle() {
+  state = 'title';
+  panel('Dot Slayer', 'A first-person maze, four zombies, and a gun that runs on dots.', rulesHtml() + rosterHtml() + controlsHtml(), 'PLAY', newGame);
+}
+
+/* ---------- flow ---------- */
+function refreshDots() {
+  dotList.forEach(d => { d.alive = true; if (d.big) d.mesh.visible = true; else placeDot(d); });
+  dotMesh.instanceMatrix.needsUpdate = true; aliveDots = dotList.length;
+}
+function resetActors() {
+  px = (playerStart.c + 0.5) * CS; pz = (playerStart.r + 0.5) * CS; yaw = Math.PI / 2; pitch = 0; invuln = 3;
+  zombies.forEach((z, i) => placeZombie(z, i, [0.8, 2.5, 4.5, 6.5][i]));
+  scatter = true; modeT = 0;
+}
+function enterPlay() {
+  el.panel.hidden = true; el.hud.hidden = false;
+  if (isTouch) { el.touch.hidden = false; el.fire.hidden = false; }
+  state = 'play'; lastT = performance.now(); tryLock();
+}
+function newGame() {
+  audioInit();
+  score = 0; level = 1; lives = 3; ammo = 16; tier = 0; wIdx = 0;
+  buildGun(0); refreshChips(); updateLives(); refreshDots(); resetActors();
+  enterPlay(); toast('EAT. SHOOT. SURVIVE.');
+}
+function nextLevel() {
+  level++; ammo = Math.min(99, ammo + 10); refreshDots(); resetActors();
+  enterPlay(); toast('LEVEL ' + level + '. THEY ARE FASTER.', '#ff3b4e');
+}
+function releaseLock() { hadLock = false; if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} } }
+function levelClear() {
+  state = 'clear'; releaseLock(); mouseFire = false; touchFire = false;
+  const bonus = 1000 * level; score += bonus;
+  tone(523, 0.15, 'square', 0.06); setTimeout(() => tone(784, 0.3, 'square', 0.06), 150);
+  panel('Level ' + level + ' cleared', 'Every dot is gone. Bonus ' + bonus + ' points.',
+    '<div class="stats"><div><span class="lbl">Score</span><br><b>' + score + '</b></div><div><span class="lbl">Gun</span><br><b>' + WEAPONS[tier].name + '</b></div></div>', 'NEXT LEVEL', nextLevel);
+}
+function gameOver() {
+  state = 'over'; releaseLock(); mouseFire = false; touchFire = false;
+  if (score > best) { best = score; try { localStorage.setItem('dotslayer-best', String(best)); } catch (e) {} }
+  panel('You got eaten', 'The zombies win this round.',
+    '<div class="stats"><div><span class="lbl">Score</span><br><b>' + score + '</b></div><div><span class="lbl">Best</span><br><b>' + best + '</b></div><div><span class="lbl">Level</span><br><b>' + level + '</b></div></div>', 'TRY AGAIN', newGame);
+}
+function hurt() {
+  lives--; invuln = 3; updateLives();
+  el.hurt.classList.add('on'); setTimeout(() => el.hurt.classList.remove('on'), 120);
+  tone(110, 0.4, 'sawtooth', 0.12, -60); noise(0.2, 0.1);
+  if (lives <= 0) { gameOver(); return; }
+  resetActors(); toast('BITTEN. ' + lives + (lives === 1 ? ' LIFE LEFT' : ' LIVES LEFT'), '#ff3b4e');
+}
+function pause() {
+  if (state !== 'play') return;
+  state = 'paused'; mouseFire = false; touchFire = false;
+  panel('Paused', 'The zombies are waiting.', controlsHtml(), 'RESUME', resume);
+}
+function resume() { audioInit(); el.panel.hidden = true; state = 'play'; lastT = performance.now(); tryLock(); }
+
+/* ---------- input ---------- */
+function tryLock() {
+  if (isTouch) return;
+  try { const p = canvas.requestPointerLock(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+}
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === canvas;
+  if (locked) hadLock = true; else if (state === 'play' && hadLock) pause();
+});
+document.addEventListener('pointerlockerror', () => { locked = false; });
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (state === 'play') {
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+    if (e.code >= 'Digit1' && e.code <= 'Digit4') selectWeapon(+e.code.slice(5) - 1);
+    if (e.code === 'KeyP') pause();
+  }
+  if (e.code === 'KeyM') toggleMute();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseFire = false; });
+let dragging = false, dragMoved = 0;
+canvas.addEventListener('mousedown', e => {
+  if (state !== 'play' || e.button !== 0 || isTouch) return;
+  if (!locked) { tryLock(); dragging = true; dragMoved = 0; } else mouseFire = true;
+});
+addEventListener('mouseup', () => {
+  if (dragging && !locked && dragMoved < 5) queued = true;
+  dragging = false; mouseFire = false;
+});
+addEventListener('mousemove', e => {
+  if (state !== 'play') return;
+  if (locked) { yaw -= e.movementX * 0.0023; pitch -= e.movementY * 0.0023; }
+  else if (dragging) { yaw -= e.movementX * 0.005; pitch -= e.movementY * 0.005; dragMoved += Math.abs(e.movementX) + Math.abs(e.movementY); }
+  pitch = Math.max(-1, Math.min(1, pitch));
+});
+canvas.addEventListener('wheel', e => {
+  if (state !== 'play') return;
+  let i = wIdx + (e.deltaY > 0 ? 1 : -1);
+  if (i > tier) i = 0; if (i < 0) i = tier;
+  selectWeapon(i);
+}, { passive: true });
+function toggleMute() { muted = !muted; el.snd.textContent = muted ? 'SOUND OFF' : 'SOUND ON'; }
+el.snd.addEventListener('click', toggleMute);
+
+/* touch: left half floats a joystick, right half looks, FIRE button shoots */
+let stickId = null, lookId = null, so = { x: 0, y: 0 }, lx = 0, ly = 0;
+function placeStick(x, y, on) {
+  const r = app.getBoundingClientRect();
+  el.stick.style.left = (x - r.left) + 'px'; el.stick.style.top = (y - r.top) + 'px';
+  el.stick.classList.toggle('on', on);
+  if (!on) el.knob.style.transform = '';
+}
+el.touch.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.clientX < innerWidth * 0.5 && stickId === null) { stickId = t.identifier; so = { x: t.clientX, y: t.clientY }; placeStick(so.x, so.y, true); }
+    else if (lookId === null) { lookId = t.identifier; lx = t.clientX; ly = t.clientY; }
+  }
+}, { passive: false });
+el.touch.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === stickId) {
+      let dx = (t.clientX - so.x) / 50, dy = (t.clientY - so.y) / 50;
+      const l = Math.hypot(dx, dy); if (l > 1) { dx /= l; dy /= l; }
+      stick.x = dx; stick.y = dy;
+      el.knob.style.transform = 'translate(' + dx * 40 + 'px,' + dy * 40 + 'px)';
+    } else if (t.identifier === lookId) {
+      yaw -= (t.clientX - lx) * 0.006; pitch -= (t.clientY - ly) * 0.005;
+      pitch = Math.max(-1, Math.min(1, pitch)); lx = t.clientX; ly = t.clientY;
+    }
+  }
+}, { passive: false });
+function touchEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === stickId) { stickId = null; stick.x = 0; stick.y = 0; placeStick(0, 0, false); }
+    if (t.identifier === lookId) lookId = null;
+  }
+}
+el.touch.addEventListener('touchend', touchEnd);
+el.touch.addEventListener('touchcancel', touchEnd);
+el.fire.addEventListener('touchstart', e => { e.preventDefault(); touchFire = true; }, { passive: false });
+el.fire.addEventListener('touchend', e => { e.preventDefault(); touchFire = false; }, { passive: false });
+el.fire.addEventListener('touchcancel', () => { touchFire = false; });
+
+/* ---------- loop ---------- */
+function resize() {
+  const w = app.clientWidth || innerWidth, h = app.clientHeight || innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  gunCam.aspect = w / h; gunCam.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+
+function step(dt) {
+  fireCd = Math.max(0, fireCd - dt); invuln = Math.max(0, invuln - dt);
+  modeT += dt;
+  if (scatter && modeT > 5) { scatter = false; modeT = 0; } else if (!scatter && modeT > 22) { scatter = true; modeT = 0; }
+  movePlayer(dt);
+  if (mouseFire || touchFire || keys.Space || keys.KeyF || queued) { fire(); queued = false; }
+  collectDots();
+  for (const z of zombies) updateZombie(z, dt);
+  if (invuln <= 0) {
+    for (const z of zombies) {
+      if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - px, z.z - pz) < 1.5) { hurt(); break; }
+    }
+  }
+  if (state === 'play' && aliveDots === 0) levelClear();
+  if (state === 'play') updateHud();
+}
+function fx(dt) {
+  updateParticles(dt); updateTracers(dt);
+  kick = Math.max(0, kick - dt * 7); flashT = Math.max(0, flashT - dt);
+  const t = performance.now() / 1000;
+  bigs.forEach((d, i) => { if (d.mesh.visible) { d.mesh.position.y = 1.3 + Math.sin(t * 2 + i) * 0.18; d.mesh.userData.cage.rotation.y = t * 1.5; d.mesh.userData.cage.rotation.x = t * 0.8; } });
+  gunRoot.position.set(0.34 + Math.sin(bobT * 0.5) * 0.012, -0.32 + bobY * 0.35 - kick * 0.02, -0.62 + kick * 0.09);
+  gunRoot.rotation.x = kick * 0.12;
+  muzzleFlash.visible = flashT > 0;
+  muzzleFlash.scale.setScalar(0.8 + Math.random() * 0.8);
+  flashLight.intensity = flashT > 0 ? 2.2 : 0;
+  if (state === 'title') { yaw += dt * 0.25; }
+}
+function render() {
+  camera.position.set(px, EYE + bobY, pz);
+  camera.rotation.set(pitch, yaw, 0);
+  renderer.clear();
+  renderer.render(scene, camera);
+  renderer.clearDepth();
+  renderer.render(gunScene, gunCam);
+  if (state !== 'title') drawMap();
+}
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  if (state === 'play') step(dt);
+  if (state !== 'paused') fx(dt);
+  render();
+}
+
+/* ---------- boot ---------- */
+try { best = +localStorage.getItem('dotslayer-best') || 0; } catch (e) {}
+window.addEventListener('touchstart', () => {}, { passive: true });
+buildChips(); updateLives(); buildGun(0); refreshChips(); resetActors(); resize(); showTitle();
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>

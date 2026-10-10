@@ -96,6 +96,9 @@ button{font-family:inherit}
 #pu{min-height:14px;font:400 12px/1 var(--display);letter-spacing:.08em;color:var(--cyan);text-shadow:0 1px 0 #000;white-space:pre}
 #jump{position:absolute;z-index:3;right:34px;bottom:126px;width:68px;height:68px;border-radius:50%;border:3px solid var(--cyan);background:rgba(70,230,255,.18);color:var(--text);font:400 12px var(--display);letter-spacing:.05em;touch-action:none}
 #jump:active{background:rgba(70,230,255,.5)}
+#spwrap{position:relative;width:min(170px,44vw);height:8px;border:1px solid var(--line);border-radius:5px;background:rgba(5,6,15,.75);overflow:hidden}
+#spfill{position:absolute;left:0;top:0;bottom:0;width:100%;background:var(--cyan)}
+#spwrap.lock #spfill{background:var(--blood)}
 #hpwrap{position:relative;width:min(240px,60vw);height:18px;border:2px solid var(--line);border-radius:9px;background:rgba(5,6,15,.75);overflow:hidden}
 #hpfill{position:absolute;left:0;top:0;bottom:0;width:100%;background:#5ef28a;transition:width .12s}
 #hptext{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;letter-spacing:.1em;color:#fff;text-shadow:0 1px 0 #000}
@@ -119,7 +122,7 @@ button{font-family:inherit}
     <div class="tr"><canvas id="map" width="114" height="126"></canvas><div id="lives" aria-label="Lives left"></div></div>
     <div id="cross"></div>
     <div id="toast" role="status"></div>
-    <div class="bm"><div id="pu"></div><div id="hpwrap" hidden><i id="hpfill"></i><b id="hptext">100</b></div><div id="ammo">0</div><span class="lbl">Ammo</span><div id="guns"></div></div>
+    <div class="bm"><div id="pu"></div><div id="hpwrap" hidden><i id="hpfill"></i><b id="hptext">100</b></div><div id="spwrap"><i id="spfill"></i></div><div id="ammo">0</div><span class="lbl">Ammo</span><div id="guns"></div></div>
     <div id="hurt"></div>
   </div>
   <button id="fire" type="button" hidden>FIRE</button>
@@ -142,7 +145,7 @@ const isTouch = (window.matchMedia && matchMedia('(pointer: coarse)').matches) |
 
 /* Maze legend: # wall, . dot (ammo), o big dot (gun upgrade), G zombie start, P player start.
    The zombie pen is the 3-cell room on row 9 plus its door on row 8. */
-const MAZE = [
+const TEMPLATE = [
   '###################',
   '#........#........#',
   '#o##.###.#.###.##o#',
@@ -165,23 +168,10 @@ const MAZE = [
   '#.................#',
   '###################'
 ];
-const ROWS = MAZE.length, COLS = MAZE[0].length, CS = 4, WALL_H = 3.4, EYE = 1.65;
-const walls = [], dotAt = [], SPAWNS = [], dotList = [];
+const ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, CS = 4, WALL_H = 3.4, EYE = 1.65, RAMP_H = 1.3;
+const walls = [], dotAt = [], SPAWNS = [], dotList = [], grid = [], hgt = [], rampRuns = [];
 let playerStart = { c: 9, r: 15 };
-for (let r = 0; r < ROWS; r++) {
-  walls.push([]); dotAt.push([]);
-  for (let c = 0; c < COLS; c++) {
-    const ch = MAZE[r][c];
-    walls[r][c] = ch === '#';
-    dotAt[r][c] = null;
-    if (ch === '.' || ch === 'o') {
-      const d = { c, r, n: dotList.length, big: ch === 'o', alive: true, idx: -1, mesh: null };
-      dotAt[r][c] = d; dotList.push(d);
-    }
-    if (ch === 'G') SPAWNS.push({ c, r });
-    if (ch === 'P') playerStart = { c, r };
-  }
-}
+for (let r = 0; r < ROWS; r++) { walls.push(new Array(COLS).fill(true)); dotAt.push(new Array(COLS).fill(null)); hgt.push(new Array(COLS).fill(null)); grid.push(new Array(COLS).fill('#')); }
 const isPen = (c, r) => (r === 9 && c >= 8 && c <= 10) || (r === 8 && c === 9);
 function wallAt(x, z) {
   const c = Math.floor(x / CS), r = Math.floor(z / CS);
@@ -234,15 +224,12 @@ floor.rotation.x = -Math.PI / 2; floor.position.set(COLS * CS / 2, 0, ROWS * CS 
 const ceil = new THREE.Mesh(new THREE.PlaneGeometry(COLS * CS, ROWS * CS), new THREE.MeshBasicMaterial({ color: 0x04050d }));
 ceil.rotation.x = Math.PI / 2; ceil.position.set(COLS * CS / 2, WALL_H, ROWS * CS / 2); scene.add(ceil);
 
-const wallCells = [];
-for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (walls[r][c]) wallCells.push([c, r]);
 const wallMesh = new THREE.InstancedMesh(
   new THREE.BoxGeometry(CS, WALL_H, CS),
   new THREE.MeshStandardMaterial({ map: wallTex, emissiveMap: wallTex, emissive: 0xffffff, emissiveIntensity: 0.85, roughness: 0.7 }),
-  wallCells.length
+  ROWS * COLS
 );
 const m4 = new THREE.Matrix4();
-wallCells.forEach(([c, r], i) => { m4.makeTranslation((c + 0.5) * CS, WALL_H / 2, (r + 0.5) * CS); wallMesh.setMatrixAt(i, m4); });
 wallMesh.frustumCulled = false;
 scene.add(wallMesh);
 
@@ -254,22 +241,216 @@ const gateMat = new THREE.MeshBasicMaterial({ color: 0xff7ac8 });
 });
 
 /* ---------- dots ---------- */
-const smalls = dotList.filter(d => !d.big), bigs = dotList.filter(d => d.big);
-const dotMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffd84a }), smalls.length);
+const smalls = [], bigs = [];
+const dotMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffd84a }), ROWS * COLS);
 dotMesh.frustumCulled = false;
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
-function placeDot(d) { m4.makeTranslation((d.c + 0.5) * CS, 1.0, (d.r + 0.5) * CS); dotMesh.setMatrixAt(d.idx, m4); }
-smalls.forEach((d, i) => { d.idx = i; placeDot(d); });
-dotMesh.instanceMatrix.needsUpdate = true;
+function placeDot(d) { m4.makeTranslation((d.c + 0.5) * CS, d.fy + 1.0, (d.r + 0.5) * CS); dotMesh.setMatrixAt(d.idx, m4); }
 scene.add(dotMesh);
-bigs.forEach(d => {
+const bigMeshes = [0, 1, 2, 3].map(() => {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), new THREE.MeshBasicMaterial({ color: 0xfff3b0 })));
   const cage = new THREE.Mesh(new THREE.OctahedronGeometry(0.95, 0), new THREE.MeshBasicMaterial({ color: 0xffd84a, wireframe: true }));
   g.add(cage); g.userData.cage = cage;
-  g.position.set((d.c + 0.5) * CS, 1.3, (d.r + 0.5) * CS);
-  scene.add(g); d.mesh = g;
+  g.visible = false; scene.add(g); return g;
 });
+
+/* ---------- random maps ----------
+   The zombie pen and its two side corridors (rows 6 to 12) are fixed. Everything above and below is re-rolled from
+   the room seed and the level number, mirrored left to right, then cleaned up so there are no dead ends and every
+   cell can be reached. Everyone in a room runs the same code with the same seed, so everyone gets the same map. */
+function mkRnd(a0) {
+  let a = a0 >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const ZONES = [[1, 5], [13, 19]];
+const inZone = r => (r >= 1 && r <= 5) || (r >= 13 && r <= 19);
+function genGrid(sd, lv) {
+  const rnd = mkRnd((Math.imul(sd | 0, 2654435761) ^ Math.imul(lv, 40503) ^ 0x9e3779b9) >>> 0);
+  const g = TEMPLATE.map(s => s.split(''));
+  const forced = new Set(), F = (c, r) => forced.add(r * COLS + c);
+  for (const [r0, r1] of ZONES) for (let r = r0; r <= r1; r++) for (let c = 1; c <= 9; c++) {
+    const even = r % 2 === 0;
+    let wall = rnd() < (even ? 0.5 : (r === 3 || r === 17 ? 0.06 : 0.2));
+    if (even && c > 1 && g[r][c - 1] === '.') wall = true;
+    g[r][c] = wall ? '#' : '.';
+  }
+  for (const [r0, r1] of ZONES) for (let r = r0; r <= r1; r++) for (let c = 1; c <= 8; c++) g[r][COLS - 1 - c] = g[r][c];
+  for (const c of [4, 8, 10, 14]) { g[5][c] = '.'; F(c, 5); }
+  for (const c of [4, 6, 12, 14]) { g[13][c] = '.'; F(c, 13); }
+  for (let c = 5; c <= 13; c++) { g[15][c] = '.'; F(c, 15); }
+  g[15][9] = 'P';
+  const flood = () => {
+    const seen = new Set([15 * COLS + 9]), q = [[9, 15]];
+    while (q.length) {
+      const [c, r] = q.pop();
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nc = c + dc, nr = r + dr;
+        if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS || g[nr][nc] === '#' || seen.has(nr * COLS + nc)) continue;
+        seen.add(nr * COLS + nc); q.push([nc, nr]);
+      }
+    }
+    return seen;
+  };
+  const wipeUnreached = () => {
+    const seen = flood();
+    for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) if (g[r][c] !== '#' && !seen.has(r * COLS + c)) g[r][c] = '#';
+  };
+  const open = (c, r) => c >= 0 && r >= 0 && c < COLS && r < ROWS && g[r][c] !== '#';
+  const setM = (c, r, ch) => { g[r][c] = ch; g[r][COLS - 1 - c] = ch; };
+  /* make sure the pen and the side corridors can be reached: carve the cheapest tunnel through the random part */
+  const carvable = (c, r) => c >= 1 && c <= COLS - 2 && inZone(r);
+  for (let guard = 0; guard < 40; guard++) {
+    const seen = flood(), tg = [];
+    for (let r = 1; r < ROWS - 1; r++) for (let c = 1; c < COLS - 1; c++) if (g[r][c] !== '#' && !seen.has(r * COLS + c)) tg.push([c, r]);
+    if (!tg.length || (tg.length < 5 && !tg.some(([c, r]) => r >= 6 && r <= 12))) break;
+    const dist = new Array(ROWS * COLS).fill(1e9), prev = new Array(ROWS * COLS).fill(-1), dq = [];
+    seen.forEach(k => { dist[k] = 0; dq.push(k); });
+    while (dq.length) {
+      const k = dq.shift(), c = k % COLS, r = (k - c) / COLS;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nc = c + dc, nr = r + dr;
+        if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS) continue;
+        const isOpen = g[nr][nc] !== '#';
+        if (!isOpen && !carvable(nc, nr)) continue;
+        const w = isOpen ? 0 : 1, nk = nr * COLS + nc;
+        if (dist[k] + w < dist[nk]) { dist[nk] = dist[k] + w; prev[nk] = k; if (w) dq.push(nk); else dq.unshift(nk); }
+      }
+    }
+    let best = null; tg.forEach(([c, r]) => { const k = r * COLS + c; if (!best || dist[k] < dist[best]) best = k; });
+    if (best === null || dist[best] >= 1e9) break;
+    for (let k = best; k >= 0; k = prev[k]) { const c = k % COLS, r = (k - c) / COLS; if (g[r][c] === '#') setM(c, r, '.'); }
+  }
+  wipeUnreached();
+  for (let pass = 0; pass < 16; pass++) {
+    let changed = false;
+    for (const [r0, r1] of ZONES) for (let r = r0; r <= r1; r++) for (let c = 1; c <= 9; c++) {
+      if (g[r][c] === '#') continue;
+      const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      if (nb.filter(([dc, dr]) => open(c + dc, r + dr)).length > 1) continue;
+      changed = true;
+      let done = false;
+      const dirs = nb.sort(() => rnd() - 0.5);
+      for (const straight of [true, false]) {
+        for (const [dc, dr] of dirs) {
+          const c1 = c + dc, r1b = r + dr;
+          if (c1 < 1 || c1 > COLS - 2 || !inZone(r1b) || open(c1, r1b)) continue;
+          const onward = nb.filter(([ec, er]) => (ec !== -dc || er !== -dr) && open(c1 + ec, r1b + er)).length;
+          if (straight ? !open(c + 2 * dc, r + 2 * dr) : onward < 1) continue;
+          setM(c1, r1b, '.'); done = true; break;
+        }
+        if (done) break;
+      }
+      if (!done && !forced.has(r * COLS + c)) setM(c, r, '#');
+    }
+    wipeUnreached();
+    if (!changed) break;
+  }
+  /* trim open plazas: wall one cell of any 2x2 open block as long as nothing gets cut off or turns into a dead end */
+  const degOk = (c, r) => g[r][c] === '#' || [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dc, dr]) => open(c + dc, r + dr)).length >= 2;
+  for (const [r0, r1] of ZONES) for (let r = r0; r < r1; r++) for (let c = 1; c <= 9; c++) {
+    if (!(open(c, r) && open(c + 1, r) && open(c, r + 1) && open(c + 1, r + 1))) continue;
+    const cells = [[c, r], [c + 1, r], [c, r + 1], [c + 1, r + 1]].filter(([cc, rr]) => !forced.has(rr * COLS + cc) && g[rr][cc] === '.' && cc >= 1 && cc <= COLS - 2);
+    if (!cells.length) continue;
+    const [cc, rr] = cells[Math.floor(rnd() * cells.length)];
+    const before = flood().size, mc = COLS - 1 - cc, save = [g[rr][cc], g[rr][mc]];
+    g[rr][cc] = '#'; g[rr][mc] = '#';
+    let ok = flood().size === before - (cc === mc ? 1 : 2);
+    if (ok) for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { if (!degOk(cc + dc, rr + dr) || !degOk(mc + dc, rr + dr)) ok = false; }
+    if (!ok) { g[rr][cc] = save[0]; g[rr][mc] = save[1]; }
+  }
+  /* big dots: one mirrored pair in the top half, one in the bottom half */
+  const pick = (r0, r1) => {
+    const cs = [];
+    for (let r = r0; r <= r1; r++) for (let c = 1; c <= 8; c++) if (g[r][c] === '.' && !forced.has(r * COLS + c) && Math.abs(c - 9) + Math.abs(r - 15) > 6) cs.push([c, r]);
+    if (cs.length) { const [c, r] = cs[Math.floor(rnd() * cs.length)]; setM(c, r, 'o'); }
+  };
+  pick(1, 5); pick(13, 19);
+  /* ramps: a straight tunnel-like run of 3 to 5 cells rises, runs flat, then comes back down */
+  const cand = [];
+  for (let L = 3; L <= 5; L++) {
+    for (const [r0, r1] of ZONES) {
+      for (let r = r0; r <= r1; r++) for (let c = 1; c + L - 1 <= COLS - 2; c++) {
+        let ok = true;
+        for (let i = 0; i < L && ok; i++) ok = g[r][c + i] === '.' && g[r - 1][c + i] === '#' && g[r + 1][c + i] === '#';
+        if (ok) cand.push({ ax: 'x', c, r, L });
+      }
+      for (let c = 1; c <= COLS - 2; c++) for (let r = r0; r + L - 1 <= r1; r++) {
+        let ok = true;
+        for (let i = 0; i < L && ok; i++) ok = g[r + i][c] === '.' && g[r + i][c - 1] === '#' && g[r + i][c + 1] === '#';
+        if (ok) cand.push({ ax: 'z', c, r, L });
+      }
+    }
+  }
+  for (let i = cand.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+  const runs = [], used = new Set(), want = 2 + (lv >= 3 ? 1 : 0);
+  for (const k of cand) {
+    if (runs.length >= want) break;
+    const cells = []; for (let i = 0; i < k.L; i++) cells.push(k.ax === 'x' ? [k.c + i, k.r] : [k.c, k.r + i]);
+    if (cells.some(([c, r]) => used.has(r * COLS + c))) continue;
+    cells.forEach(([c, r]) => { for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) used.add((r + dr) * COLS + c + dc); });
+    runs.push(k);
+  }
+  return { g, runs };
+}
+function floorY(x, z) {
+  const c = Math.floor(x / CS), r = Math.floor(z / CS);
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return 0;
+  const h = hgt[r][c];
+  if (!h) return 0;
+  const t = h.ax === 'x' ? x / CS - c : z / CS - r;
+  return h.a + (h.b - h.a) * t;
+}
+const rampGroup = new THREE.Group(); scene.add(rampGroup);
+const rampMat = new THREE.MeshStandardMaterial({ color: 0x2a3bd8, emissive: 0x1423a0, emissiveIntensity: 0.7, roughness: 0.6 });
+const rampEdge = new THREE.LineBasicMaterial({ color: 0x46e6ff });
+function genMap(sd, lv) {
+  const { g, runs } = genGrid(sd, lv);
+  SPAWNS.length = 0; dotList.length = 0; smalls.length = 0; bigs.length = 0; rampRuns.length = 0;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { hgt[r][c] = null; grid[r][c] = g[r][c]; }
+  for (const k of runs) {
+    rampRuns.push(k);
+    for (let i = 0; i < k.L; i++) {
+      const c = k.ax === 'x' ? k.c + i : k.c, r = k.ax === 'x' ? k.r : k.r + i;
+      hgt[r][c] = { ax: k.ax, a: i === 0 ? 0 : RAMP_H, b: i === k.L - 1 ? 0 : RAMP_H, run: k };
+    }
+  }
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const ch = g[r][c];
+    walls[r][c] = ch === '#'; dotAt[r][c] = null;
+    if (ch === '.' || ch === 'o') {
+      const h = hgt[r][c];
+      const d = { c, r, n: dotList.length, big: ch === 'o', alive: true, idx: -1, mesh: null, fy: h ? (h.a + h.b) / 2 : 0 };
+      dotAt[r][c] = d; dotList.push(d);
+    }
+    if (ch === 'G') SPAWNS.push({ c, r });
+    if (ch === 'P') playerStart = { c, r };
+  }
+  dotList.forEach(d => { if (d.big) { d.mesh = bigMeshes[bigs.length]; bigs.push(d); } else { d.idx = smalls.length; smalls.push(d); } });
+}
+function applyMap() {
+  let n = 0;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (walls[r][c]) { m4.makeTranslation((c + 0.5) * CS, WALL_H / 2, (r + 0.5) * CS); wallMesh.setMatrixAt(n++, m4); }
+  wallMesh.count = n; wallMesh.instanceMatrix.needsUpdate = true;
+  smalls.forEach(d => placeDot(d)); dotMesh.count = smalls.length; dotMesh.instanceMatrix.needsUpdate = true;
+  bigMeshes.forEach(m => { m.visible = false; });
+  bigs.forEach(d => { d.mesh.visible = true; d.mesh.position.set((d.c + 0.5) * CS, d.fy + 1.3, (d.r + 0.5) * CS); });
+  while (rampGroup.children.length) { const o = rampGroup.children.pop(); if (o.geometry) o.geometry.dispose(); }
+  const th = 0.26, len = Math.hypot(CS, RAMP_H), ang = Math.atan2(RAMP_H, CS);
+  const piece = (geo, x, y, z, rx, rz) => {
+    const m = new THREE.Mesh(geo, rampMat); m.position.set(x, y, z); m.rotation.x = rx || 0; m.rotation.z = rz || 0;
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), rampEdge); m.add(e); rampGroup.add(m);
+  };
+  for (const k of rampRuns) for (let i = 0; i < k.L; i++) {
+    const c = k.ax === 'x' ? k.c + i : k.c, r = k.ax === 'x' ? k.r : k.r + i, cx = (c + 0.5) * CS, cz = (r + 0.5) * CS;
+    const up = i === 0, down = i === k.L - 1;
+    if (!up && !down) piece(new THREE.BoxGeometry(CS, th, CS), cx, RAMP_H - th / 2, cz);
+    else if (k.ax === 'x') piece(new THREE.BoxGeometry(len, th, CS), cx, RAMP_H / 2 - th * 0.5, cz, 0, up ? ang : -ang);
+    else piece(new THREE.BoxGeometry(CS, th, len), cx, RAMP_H / 2 - th * 0.5, cz, up ? -ang : ang, 0);
+  }
+}
+genMap(1, 1); applyMap();
+
 
 /* ---------- weapons ---------- */
 const WEAPONS = [
@@ -398,6 +579,7 @@ function noise(d, v) {
 /* ---------- game state ---------- */
 let state = 'title', score = 0, level = 1, lives = 3, ammo = 16, tier = 0, wIdx = 0, best = 0;
 let px = 0, pz = 0, yaw = Math.PI / 2, pitch = 0, invuln = 0, fireCd = 0, kick = 0, flashT = 0, bobT = 0, bobY = 0, py = 0, vy = 0, pitCd = 0, freezeT = 0, seed = 1, jumpHeld = false, pits = [];
+let onGround = true, stam = 100, stamLock = false, stamDelay = 0, running = false, sprintK = 0, landT = 0, swapT = 0, fastMode = false;
 const pu = { haste: 0, frenzy: 0, shield: 0, freeze: 0 };
 let aliveDots = dotList.length, scatter = true, modeT = 0, lastT = performance.now();
 const keys = {}, stick = { x: 0, y: 0 };
@@ -405,7 +587,7 @@ let mouseFire = false, touchFire = false, queued = false, locked = false, hadLoc
 const net = { role: null, phase: 'lobby', code: '', peer: null, hostConn: null, conns: {}, players: {}, lobby: [], myId: 0, t: 0, boardT: 0, pvp: true };
 const START_COLS = [9, 7, 11, 5];
 const r2 = v => Math.round(v * 100) / 100;
-function placeSelf() { px = (START_COLS[net.myId] + 0.5) * CS; pz = (playerStart.r + 0.5) * CS; yaw = Math.PI / 2; pitch = 0; invuln = 3; hp = 100; py = 0; vy = 0; pitCd = 0; }
+function placeSelf() { px = (START_COLS[net.myId] + 0.5) * CS; pz = (playerStart.r + 0.5) * CS; yaw = Math.PI / 2; pitch = 0; invuln = 3; hp = 100; py = floorY(px, pz); vy = 0; pitCd = 0; onGround = true; }
 function netPlayers() {
   const out = [{ id: net.myId, x: px, z: pz, yaw: yaw, a: !ghost }];
   if (net.role === 'host') for (const id in net.players) out.push(net.players[id]);
@@ -420,7 +602,7 @@ function nearestTarget(z) {
   }
   return best || { x: px, z: pz, yaw: yaw, a: true };
 }
-const zSpeed = () => Math.min(6.4, 4.2 + 0.4 * (level - 1));
+const zSpeed = () => Math.min(6.4, 4.2 + 0.4 * (level - 1)) * (fastMode ? 1.5 : 1);
 
 /* ---------- zombies ---------- */
 const ZDEF = [
@@ -465,14 +647,20 @@ function placeZombie(z, idx, delay) {
   z.c = z.nc = s.c; z.r = z.nr = s.r; z.x = (s.c + 0.5) * CS; z.z = (s.r + 0.5) * CS;
   z.dir = [0, 0]; z.state = 'house'; z.timer = delay; z.slow = 0; z.deadT = 0;
   z.hp = z.maxHp = 3 + (level - 1);
-  z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.set(z.x, 0, z.z);
+  z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.set(z.x, floorY(z.x, z.z), z.z);
   z.fill.scale.x = 1; z.flashT = 0; z.bar.visible = false; setFlash(z, false);
 }
 function animLimbs(z, amp) {
-  const s = Math.sin(z.anim * 3) * 0.7 * amp;
-  z.legs[0].rotation.x = s; z.legs[1].rotation.x = -s;
-  z.arms[0].rotation.x = Math.PI / 2 + Math.sin(z.anim * 3 + 1) * 0.12;
-  z.arms[1].rotation.x = Math.PI / 2 - Math.sin(z.anim * 3 + 1) * 0.12;
+  const t = z.anim * 3, sw = Math.sin(t) * 0.75 * amp, m = z.mesh;
+  z.legs[0].rotation.x = sw; z.legs[1].rotation.x = -sw;
+  const near = amp > 0.5 && z.state !== 'dead' && Math.hypot(z.x - px, z.z - pz) < 6;
+  const reach = near ? 1.4 + Math.sin(t * 0.7) * 0.08 : Math.PI / 2 - 0.1;
+  const flail = (near ? 0.14 : 0.1) + 0.22 * amp * (near ? 0 : 1);
+  z.arms[0].rotation.x = reach + Math.sin(t + 1) * flail;
+  z.arms[1].rotation.x = reach - Math.sin(t + 1) * flail;
+  z.arms[0].rotation.z = 0.12 + Math.sin(t * 0.5) * 0.06 * amp; z.arms[1].rotation.z = -z.arms[0].rotation.z;
+  m.rotation.x = -(amp * 0.07 + (near ? 0.14 : 0)); m.rotation.z = Math.sin(t * 0.5) * 0.06 * amp;
+  m.position.y += Math.abs(Math.sin(t)) * 0.1 * amp;
 }
 function facingDir(ay) {
   const fx = -Math.sin(ay), fz = -Math.cos(ay);
@@ -544,7 +732,7 @@ function updateZombie(z, dt) {
   const want = Math.atan2(-z.dir[0], -z.dir[1]);
   let diff = want - z.rot; diff = Math.atan2(Math.sin(diff), Math.cos(diff));
   z.rot += diff * Math.min(1, dt * 10);
-  m.rotation.y = z.rot; m.position.set(z.x, 0, z.z);
+  m.rotation.y = z.rot; m.position.set(z.x, floorY(z.x, z.z), z.z);
   z.anim += dt * sp * 1.6; animLimbs(z, 1);
   z.bar.visible = z.hp < z.maxHp;
   if (z.bar.visible) z.bar.rotation.y = Math.atan2(px - z.x, pz - z.z) - z.rot;
@@ -607,7 +795,7 @@ function fire() {
     const reach = wallDist(_o, _d, 60), hits = [];
     for (const z of zombies) {
       if (z.state !== 'active' && z.state !== 'leaving') continue;
-      _e.set(z.x - _o.x, 1.2 - _o.y, z.z - _o.z);
+      _e.set(z.x - _o.x, 1.2 + floorY(z.x, z.z) - _o.y, z.z - _o.z);
       const t = _e.dot(_d);
       if (t < 0 || t > reach) continue;
       const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
@@ -617,7 +805,7 @@ function fire() {
       for (const id in net.players) {
         const p = net.players[id];
         if (!p.seen || !p.a) continue;
-        _e.set(p.x - _o.x, 1.3 - _o.y, p.z - _o.z);
+        _e.set(p.x - _o.x, 1.3 + (p.py || 0) - _o.y, p.z - _o.z);
         const t = _e.dot(_d);
         if (t < 0 || t > reach) continue;
         const ex = _e.x - _d.x * t, ey = _e.y - _d.y * t, ez = _e.z - _d.z * t;
@@ -651,23 +839,41 @@ function movePlayer(dt) {
   fwd -= stick.y; str += stick.x;
   const len = Math.hypot(fwd, str);
   if (len > 1) { fwd /= len; str /= len; }
-  const moving = len > 0.05, running = moving && (keys.ShiftLeft || keys.ShiftRight || stick.run);
+  const moving = len > 0.05;
+  /* sprint bar: running drains it, it refills slowly after a short pause, and an empty bar locks sprint until it is 30% full */
+  const wantRun = moving && (keys.ShiftLeft || keys.ShiftRight || stick.run);
+  running = false;
+  if (wantRun && !stamLock && stam > 0) {
+    running = true; stamDelay = 0.9;
+    if (pu.haste <= 0) stam = Math.max(0, stam - 30 * dt);
+    if (stam <= 0) stamLock = true;
+  } else {
+    stamDelay = Math.max(0, stamDelay - dt);
+    if (stamDelay <= 0) stam = Math.min(100, stam + 14 * dt);
+    if (stamLock && stam >= 30) stamLock = false;
+  }
   const sx = Math.sin(yaw), cx = Math.cos(yaw), R = 0.95;
   const sp = 6.6 * (running ? 1.6 : 1) * (pu.haste > 0 ? 1.3 : 1) * dt;
   const vx = (-sx * fwd + cx * str) * sp, vz = (-cx * fwd - sx * str) * sp;
-  if (!blockedP(px + vx, pz, R)) px += vx;
-  if (!blockedP(px, pz + vz, R)) pz += vz;
-  /* jump: Space or the JUMP button; gravity pulls you back down */
-  if ((keys.Space || jumpHeld) && py <= 0 && vy <= 0) { vy = 8.6 * (pu.haste > 0 ? 1.1 : 1); tone(380, 0.09, 'square', 0.03, 260); }
-  if (py > 0 || vy > 0) {
-    vy -= 24 * dt; py += vy * dt;
-    if (py <= 0) { py = 0; vy = 0; tone(90, 0.06, 'sine', 0.05); }
+  /* walls block you, and so does a ledge taller than a step. Ramps are gentle enough to walk up. */
+  if (!blockedP(px + vx, pz, R) && floorY(px + vx, pz) <= py + 0.6) px += vx;
+  if (!blockedP(px, pz + vz, R) && floorY(px, pz + vz) <= py + 0.6) pz += vz;
+  const gy = floorY(px, pz);
+  if ((keys.Space || jumpHeld) && onGround) { vy = 8.6 * (pu.haste > 0 ? 1.1 : 1); onGround = false; tone(380, 0.09, 'square', 0.03, 260); }
+  if (onGround) {
+    if (py - gy > 0.35) onGround = false; else { py = gy; vy = 0; }
   }
-  const grounded = py <= 0;
-  bobT += dt * (moving && grounded ? (running ? 13 : 9) : 0);
-  bobY = moving && grounded ? Math.sin(bobT) * (running ? 0.08 : 0.05) : bobY * 0.8;
+  if (!onGround) {
+    vy -= 24 * dt; py += vy * dt;
+    if (py <= gy) {
+      if (vy <= 0) { if (vy < -5) { tone(90, 0.07, 'sine', 0.05); landT = Math.min(0.2, -vy * 0.012); } py = gy; vy = 0; onGround = true; }
+      else py = gy;
+    }
+  }
+  bobT += dt * (moving && onGround ? (running ? 13 : 9) : 0);
+  bobY = moving && onGround ? Math.sin(bobT) * (running ? 0.08 : 0.05) : bobY * 0.8;
   pitCd = Math.max(0, pitCd - dt);
-  if (py <= 0.2 && pitCd <= 0 && invuln <= 0 && !ghost) {
+  if (onGround && gy < 0.05 && pitCd <= 0 && invuln <= 0 && !ghost) {
     for (const pit of pits) if (Math.abs(px - pit.x) < PIT_HALF && Math.abs(pz - pit.z) < PIT_HALF) { pitHit(pit); break; }
   }
 }
@@ -678,7 +884,7 @@ function collectDots() {
     const c = pc + dc, r = pr + dr;
     if (c < 0 || r < 0 || c >= COLS || r >= ROWS) continue;
     const d = dotAt[r][c];
-    if (!d || !d.alive) continue;
+    if (!d || !d.alive || Math.abs(py - d.fy) > 1.5) continue;
     const dx = px - (c + 0.5) * CS, dz = pz - (r + 0.5) * CS;
     if (dx * dx + dz * dz > 3.4) continue;
     d.alive = false; aliveDots--; netDot(d.n);
@@ -722,7 +928,7 @@ function genPits(lv) {
   const rnd = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const cand = [];
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-    if (MAZE[r][c] === '#' || MAZE[r][c] === 'o') continue;
+    if (grid[r][c] === '#' || grid[r][c] === 'o' || hgt[r][c]) continue;
     if (r >= 5 && r <= 12 && c >= 5 && c <= 13) continue;
     if (START_COLS.some(sc => Math.abs(c - sc) + Math.abs(r - playerStart.r) < 3)) continue;
     cand.push({ c, r });
@@ -746,7 +952,7 @@ function genPits(lv) {
   [pitBase, pitHole, pitSpike].forEach(m => { m.instanceMatrix.needsUpdate = true; });
 }
 function pitHit(pit) {
-  pitCd = 1; vy = 7; noise(0.15, 0.1); tone(160, 0.2, 'sawtooth', 0.08, -90);
+  pitCd = 1; vy = 7; onGround = false; noise(0.15, 0.1); tone(160, 0.2, 'sawtooth', 0.08, -90);
   const dx = px - pit.x, dz = pz - pit.z, sx = Math.sign(dx) || 1, sz = Math.sign(dz) || 1;
   const dirs = Math.abs(dx) > Math.abs(dz) ? [[sx, 0], [0, sz], [-sx, 0], [0, -sz]] : [[0, sz], [sx, 0], [0, -sz], [-sx, 0]];
   for (const [ax, az] of dirs) {
@@ -758,6 +964,10 @@ function pitHit(pit) {
   if (hp <= 0) hurt(null); else toast('SPIKES. JUMP THE PITS', '#ff3b4e');
 }
 
+/* a fresh map plus fresh pits for a level */
+const modeLabel = () => 'MODE: ' + (fastMode ? 'FAST ZOMBS' : 'NORMAL');
+function buildLevel(lv) { genMap(seed, lv); applyMap(); genPits(lv); }
+
 /* ---------- multiplayer: peer to peer, the host runs the zombies ---------- */
 const PCOLORS = [0xffd84a, 0x5ef28a, 0xb98aff, 0xffffff];
 const PCSS = ['#ffd84a', '#5ef28a', '#b98aff', '#ffffff'];
@@ -768,14 +978,18 @@ function makeGuy(id) {
   const col = new THREE.MeshStandardMaterial({ color: PCOLORS[id], roughness: 0.7, flatShading: true, emissive: PCOLORS[id], emissiveIntensity: 0.25 });
   const skin = new THREE.MeshStandardMaterial({ color: 0xd9a37c, roughness: 0.8, flatShading: true });
   const dark = new THREE.MeshStandardMaterial({ color: 0x20243f, roughness: 0.8, flatShading: true });
-  const part = (w, h, d, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); g.add(b); return b; };
-  part(0.28, 0.9, 0.3, dark, -0.17, 0.45, 0); part(0.28, 0.9, 0.3, dark, 0.17, 0.45, 0);
-  part(0.8, 0.95, 0.42, col, 0, 1.38, 0);
-  part(0.5, 0.5, 0.5, skin, 0, 2.12, 0);
-  part(0.52, 0.14, 0.54, col, 0, 2.4, 0);
-  part(0.22, 0.22, 0.7, skin, 0.5, 1.6, -0.35);
-  part(0.12, 0.14, 0.6, dark, 0.5, 1.68, -0.85);
-  part(0.22, 0.8, 0.22, skin, -0.52, 1.4, 0);
+  const part = (w, h, d, m, x, y, z, parent) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); (parent || g).add(b); return b; };
+  const piv = (x, y, z, parent) => { const p = new THREE.Group(); p.position.set(x, y, z); (parent || g).add(p); return p; };
+  const legs = [-0.17, 0.17].map(x => { const p = piv(x, 0.9, 0); part(0.28, 0.9, 0.3, dark, 0, -0.45, 0, p); return p; });
+  const torso = piv(0, 0.9, 0);
+  part(0.8, 0.95, 0.42, col, 0, 0.48, 0, torso);
+  part(0.5, 0.5, 0.5, skin, 0, 1.22, 0, torso);
+  part(0.52, 0.14, 0.54, col, 0, 1.5, 0, torso);
+  const armL = piv(-0.52, 0.8, 0, torso); part(0.22, 0.8, 0.22, skin, 0, -0.4, 0, armL);
+  const armR = piv(0.52, 0.8, 0, torso); part(0.22, 0.8, 0.22, skin, 0, -0.4, 0, armR);
+  part(0.14, 0.2, 0.55, dark, 0, -0.85, -0.12, armR);
+  armR.rotation.x = 1.35;
+  g.userData.legs = legs; g.userData.torso = torso; g.userData.armL = armL; g.userData.armR = armR;
   const c = document.createElement('canvas'); c.width = 128; c.height = 48;
   const x = c.getContext('2d'); x.font = '700 30px sans-serif'; x.textAlign = 'center'; x.fillStyle = PCSS[id]; x.fillText('P' + (id + 1), 64, 34);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
@@ -790,7 +1004,7 @@ function makeGuy(id) {
   return g;
 }
 function newRemote(id) {
-  return { id, name: 'P' + (id + 1), x: 0, z: 0, yaw: 0, tx: 0, tz: 0, tyaw: 0, pitch: 0, w: 0, l: 3, s: 0, a: true, hp: 100, inv: 0, py: 0, last: performance.now(), seen: false, mesh: makeGuy(id) };
+  return { id, name: 'P' + (id + 1), x: 0, z: 0, yaw: 0, tx: 0, tz: 0, tyaw: 0, pitch: 0, w: 0, l: 3, s: 0, a: true, hp: 100, inv: 0, py: 0, v: 0, ph: 0, kickT: 0, last: performance.now(), seen: false, mesh: makeGuy(id) };
 }
 function setRemote(p, a) {
   p.tx = a[1]; p.tz = a[2]; p.tyaw = a[3]; p.pitch = a[4]; p.w = a[5]; p.l = a[6]; p.s = a[7]; p.a = !!a[8]; p.hp = a.length > 9 ? a[9] : 100; p.py = a.length > 10 ? a[10] : 0;
@@ -807,7 +1021,15 @@ function updateRemotes(dt) {
     if (!p.seen) { p.mesh.visible = false; continue; }
     p.x += (p.tx - p.x) * k; p.z += (p.tz - p.z) * k;
     let dy = p.tyaw - p.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); p.yaw += dy * k;
-    p.mesh.visible = p.a; p.mesh.position.set(p.x, p.py || 0, p.z); p.mesh.rotation.y = p.yaw;
+    const spd = Math.min(14, Math.hypot(p.tx - p.x, p.tz - p.z) * 12);
+    p.v += (spd - p.v) * Math.min(1, dt * 10); p.ph += p.v * dt * 1.3; p.kickT = Math.max(0, p.kickT - dt);
+    const amp = Math.min(1, p.v / 5), air = (p.py || 0) > floorY(p.x, p.z) + 0.2, u = p.mesh.userData, ph = p.ph;
+    p.mesh.visible = p.a; p.mesh.position.set(p.x, (p.py || 0) + (air ? 0 : Math.abs(Math.sin(ph)) * 0.07 * amp), p.z); p.mesh.rotation.y = p.yaw;
+    u.legs[0].rotation.x = air ? 0.6 : Math.sin(ph) * 0.9 * amp; u.legs[1].rotation.x = air ? -0.4 : -Math.sin(ph) * 0.9 * amp;
+    u.armL.rotation.x = air ? 2.5 : -Math.sin(ph) * 0.8 * amp;
+    u.armR.rotation.x = 1.35 + Math.sin(ph * 2) * 0.05 * amp - p.kickT * 2.4 + (air ? -0.2 : 0);
+    u.torso.rotation.x = -Math.min(1, p.v / 9) * 0.2; u.torso.rotation.z = Math.sin(ph) * 0.05 * amp;
+    u.torso.scale.y = 1 + Math.sin(performance.now() / 420 + p.id) * 0.012;
     const f = Math.max(0.001, p.hp / 100), ud = p.mesh.userData;
     ud.fill.scale.x = f; ud.fill.material.color.setHSL(f * 0.33, 0.85, 0.5);
     ud.bar.rotation.y = Math.atan2(px - p.x, pz - p.z) - p.yaw;
@@ -824,10 +1046,10 @@ function netDot(n) {
 }
 function netFx(a, b, c, w) {
   if (!net.role) return;
-  const m = { t: 'fx', ox: r2(a.x), oy: r2(a.y), oz: r2(a.z), ex: r2(b.x), ey: r2(b.y), ez: r2(b.z), c, w };
+  const m = { t: 'fx', ox: r2(a.x), oy: r2(a.y), oz: r2(a.z), ex: r2(b.x), ey: r2(b.y), ez: r2(b.z), c, w, by: net.myId };
   if (net.role === 'host') netBroadcast(m); else netSend(m);
 }
-function spawnFx(m) { tracer(new THREE.Vector3(m.ox, m.oy, m.oz), new THREE.Vector3(m.ex, m.ey, m.ez), m.c, m.w); }
+function spawnFx(m) { const q = net.players[m.by]; if (q) q.kickT = 0.15; tracer(new THREE.Vector3(m.ox, m.oy, m.oz), new THREE.Vector3(m.ex, m.ey, m.ez), m.c, m.w); }
 function remoteDot(n) {
   const d = dotList[n];
   if (!d || !d.alive) return false;
@@ -855,9 +1077,9 @@ function netTick(dt) {
 function hostContact(dt) {
   for (const id in net.players) {
     const p = net.players[id]; p.inv = Math.max(0, p.inv - dt);
-    if (!p.a || p.inv > 0 || !p.seen || freezeT > 0 || (p.py || 0) > 1.0) continue;
+    if (!p.a || p.inv > 0 || !p.seen || freezeT > 0) continue;
     for (const z of zombies) {
-      if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - p.x, z.z - p.z) < 1.5) {
+      if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - p.x, z.z - p.z) < 1.5 && Math.abs((p.py || 0) - floorY(z.x, z.z)) < 1.0) {
         netToPeer(+id, { t: 'hurt' }); p.inv = 1.5; placeZombie(z, z.i, 2); break;
       }
     }
@@ -873,7 +1095,7 @@ function hostStart() {
   net.phase = 'play';
   for (const id in net.players) { net.players[id].inv = 3; net.players[id].a = true; }
   seed = (Math.random() * 1e9) | 0;
-  netBroadcast({ t: 'begin', pvp: net.pvp, seed });
+  netBroadcast({ t: 'begin', pvp: net.pvp, seed, fast: fastMode });
   newGame();
 }
 function mpNext() {
@@ -944,7 +1166,7 @@ function puppetZombie(z, dt) {
   const k = Math.min(1, dt * 12), pen = z.state === 'house';
   z.x += (z.tx - z.x) * k; z.z += (z.tz - z.z) * k;
   let d = z.trot - z.rot; d = Math.atan2(Math.sin(d), Math.cos(d)); z.rot += d * k;
-  m.rotation.y = z.rot; m.position.set(z.x, pen ? Math.sin(z.anim * 2) * 0.05 : 0, z.z);
+  m.rotation.y = z.rot; m.position.set(z.x, pen ? Math.sin(z.anim * 2) * 0.05 : floorY(z.x, z.z), z.z);
   z.anim += dt * (pen ? 2 : zSpeed() * 1.6); animLimbs(z, pen ? 0.4 : 1);
   z.bar.visible = z.hp < z.maxHp && !pen;
   if (z.bar.visible) z.bar.rotation.y = Math.atan2(px - z.x, pz - z.z) - z.rot;
@@ -976,9 +1198,9 @@ function onClientData(m) {
   if (!m) return;
   switch (m.t) {
     case 'welcome': net.myId = m.id; break;
-    case 'lobby': net.lobby = m.list; net.pvp = !!m.pvp; renderLobby(); break;
+    case 'lobby': net.lobby = m.list; net.pvp = !!m.pvp; fastMode = !!m.fast; renderLobby(); break;
     case 'reject': leaveRoom(); showNote('Could not join', m.reason); break;
-    case 'begin': net.phase = 'play'; net.pvp = !!m.pvp; seed = m.seed | 0; newGame(); if (!isTouch) toast('CLICK TO AIM', '#46e6ff'); break;
+    case 'begin': net.phase = 'play'; net.pvp = !!m.pvp; fastMode = !!m.fast; seed = m.seed | 0; newGame(); if (!isTouch) toast('CLICK TO AIM', '#46e6ff'); break;
     case 'snap': applySnap(m); break;
     case 'dot': remoteDot(m.n); break;
     case 'fx': spawnFx(m); break;
@@ -1038,10 +1260,11 @@ function lobbyBody() {
     '</ul>' + (net.role === 'host'
       ? '<button id="pvpbtn" class="btn alt" type="button">SHOOT EACH OTHER: ' + (net.pvp ? 'ON' : 'OFF') + '</button>'
       : '<p class="keys">Shooting each other: ' + (net.pvp ? 'on' : 'off') + '</p>') +
+    (net.role === 'host' ? '<button id="fastbtn" class="btn alt" type="button">' + modeLabel() + '</button>' : '<p class="keys">' + modeLabel() + '</p>') +
     '<button id="leavebtn" class="btn alt" type="button">LEAVE ROOM</button>';
 }
 function renderLobby() { if (net.phase !== 'lobby' || !net.role) return; $('pbody').innerHTML = lobbyBody(); bindPanel(); }
-function broadcastLobby() { netBroadcast({ t: 'lobby', list: hostList(), pvp: net.pvp }); renderLobby(); }
+function broadcastLobby() { netBroadcast({ t: 'lobby', list: hostList(), pvp: net.pvp, fast: fastMode }); renderLobby(); }
 function showMpOver(res) {
   state = 'over'; releaseLock(); mouseFire = false; touchFire = false;
   const rows = res.slice().sort((a, b) => b.s - a.s).map(r => '<li><i class="sw" style="background:' + PCSS[r.id] + '"></i><div><b>P' + (r.id + 1) + (r.id === net.myId ? ' (you)' : '') + '</b><span>' + r.s + ' pts</span></div></li>').join('');
@@ -1127,6 +1350,7 @@ function mpHtml() {
 }
 function bindPanel() {
   const l = $('leavebtn'); if (l) l.onclick = leaveRoom;
+  const fb = $('fastbtn'); if (fb) fb.onclick = () => { fastMode = !fastMode; fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); };
   const pv = $('pvpbtn'); if (pv) pv.onclick = () => { net.pvp = !net.pvp; broadcastLobby(); };
   const h = $('hostbtn'); if (h) h.onclick = () => { audioInit(); hostRoom(0); };
   const j = $('joinbtn'), c = $('code');
@@ -1141,7 +1365,7 @@ const el = {
   score: $('score'), level: $('level'), left: $('left'), ammo: $('ammo'), lives: $('lives'), fill: $('barfill'),
   guns: $('guns'), hurt: $('hurt'), cross: $('cross'), hud: $('hud'), panel: $('panel'), touch: $('touch'),
   fire: $('fire'), stick: $('stick'), knob: $('knob'), snd: $('snd'), toast: $('toast'),
-  hpwrap: $('hpwrap'), hpfill: $('hpfill'), hptext: $('hptext'), pu: $('pu'), jump: $('jump')
+  hpwrap: $('hpwrap'), hpfill: $('hpfill'), hptext: $('hptext'), pu: $('pu'), jump: $('jump'), spwrap: $('spwrap'), spfill: $('spfill')
 };
 const hudCache = {};
 function setText(k, v) { if (hudCache[k] !== v) { hudCache[k] = v; el[k].textContent = v; } }
@@ -1153,6 +1377,7 @@ function updateHud() {
   el.ammo.classList.toggle('low', ammo <= 5);
   el.fill.style.width = ((1 - aliveDots / dotList.length) * 100).toFixed(1) + '%';
   setText('pu', Object.keys(pu).filter(k => pu[k] > 0).map(k => k.toUpperCase() + ' ' + Math.ceil(pu[k])).join('   '));
+  el.spfill.style.width = stam.toFixed(0) + '%'; el.spwrap.classList.toggle('lock', stamLock);
   el.hpwrap.hidden = false;
   {
     const f = Math.max(0, hp) / 100;
@@ -1179,7 +1404,7 @@ function refreshChips() {
 }
 function selectWeapon(i, silent) {
   if (i > tier || i < 0) return;
-  wIdx = i; buildGun(i); refreshChips(); fireCd = Math.max(fireCd, 0.15);
+  wIdx = i; buildGun(i); refreshChips(); fireCd = Math.max(fireCd, 0.15); swapT = 0.25;
   if (!silent) tone(300, 0.05, 'square', 0.03);
 }
 function toast(t, color) {
@@ -1192,12 +1417,14 @@ const mapC = $('map'), mg = mapC.getContext('2d'), MS = 6;
 mapC.width = COLS * MS; mapC.height = ROWS * MS;
 const mapBase = document.createElement('canvas');
 mapBase.width = COLS * MS; mapBase.height = ROWS * MS;
-(() => {
+function drawMapBase() {
   const g = mapBase.getContext('2d');
   g.fillStyle = '#080b24'; g.fillRect(0, 0, mapBase.width, mapBase.height);
   g.fillStyle = '#4057ff';
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (walls[r][c]) g.fillRect(c * MS, r * MS, MS, MS);
-})();
+  g.fillStyle = '#46e6ff';
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (hgt[r][c]) g.fillRect(c * MS, r * MS + 1, MS, MS - 2);
+}
 function drawMap() {
   mg.drawImage(mapBase, 0, 0);
   mg.fillStyle = '#ff3b4e';
@@ -1224,16 +1451,17 @@ function panel(title, sub, body, btn, handler) {
   el.panel.hidden = false; bindPanel();
   if (handler) { try { b.focus({ preventScroll: true }); } catch (e) {} }
 }
-const rulesHtml = () => '<ul class="rules"><li>Walk over dots to collect them. Every dot is ammo.</li><li>Big dots are power-ups: haste, shield, frenzy, freeze, medkit, ammo.</li><li>You get a better gun every level (pistol, SMG, shotgun, rail cannon). Die and you drop one.</li><li>Spike pits move every level. Jump them.</li><li>Four zombies hunt you, each in its own way. Eat every dot to clear the level.</li></ul>';
+const rulesHtml = () => '<ul class="rules"><li>Walk over dots to collect them. Every dot is ammo.</li><li>Big dots are power-ups: haste, shield, frenzy, freeze, medkit, ammo.</li><li>You get a better gun every level (pistol, SMG, shotgun, rail cannon). Die and you drop one.</li><li>Every level is a new random map with ramps to climb and spike pits to jump.</li><li>Sprinting drains the sprint bar. It refills slowly.</li><li>Four zombies hunt you, each in its own way. Eat every dot to clear the level.</li></ul>';
 const rosterHtml = () => '<ul class="roster">' + ZDEF.map(z => '<li><i class="sw" style="background:' + z.css + '"></i><div><b>' + z.name + '</b><span>' + z.role + '</span></div></li>').join('') + '</ul>';
 const controlsHtml = () => isTouch
   ? '<p class="keys">Left thumb moves. Right thumb looks. FIRE shoots. Tap a gun chip to switch.</p>'
-  : '<p class="keys">WASD move, mouse look, click or F to fire, Space jump, Shift run, 1 to 4 switch gun, M mute, Esc pause. If the mouse will not lock, drag to look.</p>';
+  : '<p class="keys">WASD move, mouse look, click or F to fire, Space jump, Shift sprint, 1 to 4 switch gun, M mute, Esc pause. If the mouse will not lock, drag to look.</p>';
+const modeHtml = () => '<div class="mp"><span class="lbl">Zombie speed</span><div class="mprow"><button id="fastbtn" class="btn alt" type="button">' + modeLabel() + '</button></div></div>';
 function soloStart() { netReset(); newGame(); }
 function showTitle() {
   state = 'title'; releaseLock();
   el.hud.hidden = true; el.touch.hidden = true; el.fire.hidden = true; el.jump.hidden = true;
-  panel('Dot Slayer', 'A first-person maze, four zombies, and a gun that runs on dots.', rulesHtml() + rosterHtml() + controlsHtml() + mpHtml(), 'PLAY SOLO', soloStart);
+  panel('Dot Slayer', 'A first-person maze, four zombies, and a gun that runs on dots.', rulesHtml() + rosterHtml() + controlsHtml() + modeHtml() + mpHtml(), 'PLAY SOLO', soloStart);
 }
 
 /* ---------- flow ---------- */
@@ -1255,16 +1483,16 @@ function newGame() {
   audioInit();
   score = 0; level = 1; lives = 3; ammo = 16; tier = 0; wIdx = 0; ghost = false;
   if (!net.role) seed = (Math.random() * 1e9) | 0;
-  clearPowers(); genPits(1);
+  clearPowers(); buildLevel(1); drawMapBase();
   buildGun(0); refreshChips(); updateLives(); refreshDots(); resetActors();
-  enterPlay(); toast('EAT. SHOOT. SURVIVE.');
+  enterPlay(); toast(fastMode ? 'FAST ZOMBS. RUN.' : 'EAT. SHOOT. SURVIVE.');
 }
 function nextLevel() {
   level++; ammo = Math.min(99, ammo + 10);
   if (ghost) { ghost = false; lives = 1; updateLives(); }
   const up = tier < WEAPONS.length - 1;
   if (up) { tier++; selectWeapon(tier, true); }
-  clearPowers(); genPits(level);
+  clearPowers(); buildLevel(level); drawMapBase();
   refreshDots(); resetActors();
   enterPlay(); toast('LEVEL ' + level + (up ? '. ' + WEAPONS[tier].name + ' UNLOCKED' : '. THEY ARE FASTER'), up ? '#' + WEAPONS[tier].color.toString(16).padStart(6, '0') : '#ff3b4e');
 }
@@ -1428,9 +1656,9 @@ function step(dt) {
     for (const z of zombies) puppetZombie(z, dt);
   } else {
     for (const z of zombies) updateZombie(z, dt);
-    if (invuln <= 0 && !ghost && freezeT <= 0 && py < 1.0) {
+    if (invuln <= 0 && !ghost && freezeT <= 0) {
       for (const z of zombies) {
-        if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - px, z.z - pz) < 1.5) { if (net.role) takeDamage(25, -1, z); else hurt(z); break; }
+        if ((z.state === 'active' || z.state === 'leaving') && Math.hypot(z.x - px, z.z - pz) < 1.5 && Math.abs(py - floorY(z.x, z.z)) < 1.0) { if (net.role) takeDamage(25, -1, z); else hurt(z); break; }
       }
     }
     if (net.role === 'host') hostContact(dt);
@@ -1446,16 +1674,21 @@ function fx(dt) {
   updateParticles(dt); updateTracers(dt);
   kick = Math.max(0, kick - dt * 7); flashT = Math.max(0, flashT - dt);
   const t = performance.now() / 1000;
-  bigs.forEach((d, i) => { if (d.mesh.visible) { d.mesh.position.y = 1.3 + Math.sin(t * 2 + i) * 0.18; d.mesh.userData.cage.rotation.y = t * 1.5; d.mesh.userData.cage.rotation.x = t * 0.8; } });
-  gunRoot.position.set(0.34 + Math.sin(bobT * 0.5) * 0.012, -0.32 + bobY * 0.35 - kick * 0.02, -0.62 + kick * 0.09);
-  gunRoot.rotation.x = kick * 0.12;
+  bigs.forEach((d, i) => { if (d.mesh.visible) { d.mesh.position.y = d.fy + 1.3 + Math.sin(t * 2 + i) * 0.18; d.mesh.userData.cage.rotation.y = t * 1.5; d.mesh.userData.cage.rotation.x = t * 0.8; } });
+  sprintK += ((running ? 1 : 0) - sprintK) * Math.min(1, dt * 8);
+  swapT = Math.max(0, swapT - dt); landT = Math.max(0, landT - dt * 1.1);
+  const swapDrop = Math.sin(Math.min(1, swapT / 0.25) * Math.PI) * 0.35;
+  gunRoot.position.set(0.34 + Math.sin(bobT * 0.5) * (0.012 + sprintK * 0.03) - sprintK * 0.06, -0.32 + bobY * 0.35 - kick * 0.02 - sprintK * 0.07 - swapDrop - landT * 0.5 + (onGround ? 0 : 0.03), -0.62 + kick * 0.09);
+  gunRoot.rotation.x = kick * 0.12 + sprintK * 0.28 + swapDrop * 0.8;
+  gunRoot.rotation.z = -sprintK * 0.4;
+  const tf = running ? 88 : 78; if (Math.abs(camera.fov - tf) > 0.1) { camera.fov += (tf - camera.fov) * Math.min(1, dt * 8); camera.updateProjectionMatrix(); }
   muzzleFlash.visible = flashT > 0;
   muzzleFlash.scale.setScalar(0.8 + Math.random() * 0.8);
   flashLight.intensity = flashT > 0 ? 2.2 : 0;
   if (state === 'title') { yaw += dt * 0.25; }
 }
 function render() {
-  camera.position.set(px, EYE + py + bobY, pz);
+  camera.position.set(px, EYE + py + bobY - landT * 1.2, pz);
   camera.rotation.set(pitch, yaw, 0);
   renderer.clear();
   renderer.render(scene, camera);
@@ -1474,7 +1707,7 @@ function frame(now) {
 /* ---------- boot ---------- */
 try { best = +localStorage.getItem('dotslayer-best') || 0; } catch (e) {}
 window.addEventListener('touchstart', () => {}, { passive: true });
-buildChips(); updateLives(); buildGun(0); refreshChips(); resetActors(); resize(); showTitle();
+buildChips(); updateLives(); buildGun(0); refreshChips(); drawMapBase(); resetActors(); resize(); showTitle();
 requestAnimationFrame(frame);
 
 })();

@@ -171,7 +171,7 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 const MAXE = 6, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;
 const CS = 4, WALL_H = 4.2, CEIL_H = 11, EYE = 2.05, RAMP_H = 1.3;
@@ -620,7 +620,7 @@ function nearestTarget(z) {
   }
   return best || { x: px, z: pz, yaw: yaw, a: true };
 }
-const zSpeed = () => Math.min(6.4, 4.2 + 0.4 * (level - 1)) * [1, 1.5, 1.65][gameMode];
+const zSpeed = () => Math.min(6.4, 4.2 + 0.4 * (level - 1)) * [1, 1.5, 1.65, 1][gameMode];
 
 /* ---------- zombies ---------- */
 const ZDEF = [
@@ -1041,7 +1041,7 @@ function zombieHit(z, reach, radius) {
 function fire() {
   const w = WEAPONS[wIdx];
   if (fireCd > 0 || state !== 'play' || ghost) return;
-  const free = pu.frenzy > 0;
+  const free = pu.frenzy > 0 || gameMode === 3;
   if (!free && ammo < w.cost) {
     fireCd = 0.3; tone(120, 0.08, 'square', 0.05);
     if (ammo <= 0) toast('OUT OF AMMO. EAT DOTS!', '#ff3b4e');
@@ -1234,7 +1234,7 @@ function pitHit(pit) {
 }
 
 /* a fresh map plus fresh pits for a level */
-const modeLabel = () => 'MODE: ' + ['NORMAL', 'FAST ZOMBS', 'INSANE'][gameMode];
+const modeLabel = () => 'MODE: ' + ['NORMAL', 'FAST ZOMBS', 'INSANE', 'DEV MODE'][gameMode];
 let mapHash = 0;
 function computeMapHash() {
   const str = grid.map(r => r.join('')).join('|') + specials.map(s => s.kind + Math.round(s.home.x) + ':' + Math.round(s.home.z)).join(',') + pits.map(p => p.c + ':' + p.r).join(',');
@@ -1264,6 +1264,7 @@ function volAt(x, z, v) { return v * Math.max(0.15, 1 - dist2d(x, z, px, pz) / 4
 
 /* chance per round that each kind shows up; it climbs every level, and INSANE starts high */
 function specialChances(lv) {
+  if (gameMode === 3) return { wall: 1, charger: 1, ambusher: 1, stalker: 1 };
   const ins = gameMode === 2, k = lv - 1, cap = ins ? 0.97 : 0.9;
   return {
     wall: Math.min(cap, (ins ? 0.5 : 0.08) + (ins ? 0.07 : 0.06) * k),
@@ -1303,7 +1304,7 @@ function planSpecials(lv) {
     for (let i = 0; i < n; i++) { const o = pickFrom(farOpen, used); if (o) plan.push({ kind: 'charger', c: o.c, r: o.r }); }
   }
   if (rA < ch.ambusher) {
-    const n = Math.min(ins ? 7 : 4, (ins ? 2 : 1) + Math.floor(rN * ((ins ? 2 : 1) + lv / (ins ? 3 : 4))));
+    const n = gameMode === 3 ? 3 : Math.min(ins ? 7 : 4, (ins ? 2 : 1) + Math.floor(rN * ((ins ? 2 : 1) + lv / (ins ? 3 : 4))));
     for (let i = 0; i < n; i++) {
       const o = pickFrom(tops, used); if (!o) break;
       plan.push({ kind: 'ambusher', c: o.c, r: o.r, d: o.d });
@@ -1490,7 +1491,7 @@ function chargerSees(s) {
   return found;
 }
 function simCharger(s, dt) {
-  const mult = [1, 1.15, 1.3][gameMode];
+  const mult = [1, 1.15, 1.3, 1][gameMode];
   s.stT += dt; s.anim += dt;
   switch (s.st) {
     case CH.WANDER:
@@ -1515,7 +1516,7 @@ function simCharger(s, dt) {
       break;
     }
     case CH.SPLAT:
-      if (s.stT > [3.4, 3.0, 2.6][gameMode]) setSpState(s, CH.RECOVER);
+      if (s.stT > [3.4, 3.0, 2.6, 3.4][gameMode]) setSpState(s, CH.RECOVER);
       break;
     case CH.RECOVER:
       if (s.stT > 0.9) {
@@ -1559,7 +1560,7 @@ function simStalker(s, dt) {
     s.tid = tgt.id; s.idx = nearestCrumb(trails[tgt.id] || [], s.x, s.z);
   }
   const t = trails[s.tid] || [];
-  const mult = [1, 1.08, 1.18][gameMode], behind = t.length - s.idx;
+  const mult = [1, 1.08, 1.18, 1][gameMode], behind = t.length - s.idx;
   let step = 8.3 * mult * (behind > 70 ? 1.3 : 1) * dt, guard = 0;
   while (step > 0 && guard++ < 6) {
     const gx = s.idx < t.length ? t[s.idx].x : tgt.x, gz = s.idx < t.length ? t[s.idx].z : tgt.z;
@@ -1578,7 +1579,7 @@ function simWall(s, dt) {
   const lx = s.x + s.dir[0] * 0.6, lz = s.z + s.dir[1] * 0.6;
   eachPlayer(p => { if (Math.abs(p.x - lx) < 2.45 && Math.abs(p.z - lz) < 2.45 && p.py < floorY(s.x, s.z) + WALL_BH) blocked = true; });
   if (blocked) return;
-  const sp = Math.min(2.8, 1.7 + 0.05 * (level - 1)) * [1, 1.25, 1.5][gameMode];
+  const sp = Math.min(2.8, 1.7 + 0.05 * (level - 1)) * [1, 1.25, 1.5, 1][gameMode];
   gridMove(s, dt, sp, pickChase);
 }
 function leapTo(s, tx, tz, ty, dur, st) {
@@ -2217,7 +2218,7 @@ function hitPlayer(p, w, head) {
   else netSend({ t: 'pvp', to: p.id, n });
 }
 function takeDamage(n, by, z) {
-  if (ghost || invuln > 0 || state !== 'play') return;
+  if (ghost || invuln > 0 || state !== 'play' || gameMode === 3) return;
   hp = Math.max(0, hp - n);
   el.hurt.classList.add('on'); setTimeout(() => el.hurt.classList.remove('on'), 120);
   tone(140, 0.12, 'sawtooth', 0.07, -60);
@@ -2343,7 +2344,7 @@ function mpHtml() {
 }
 function bindPanel() {
   const l = $('leavebtn'); if (l) l.onclick = leaveRoom;
-  const fb = $('fastbtn'); if (fb) fb.onclick = () => { gameMode = (gameMode + 1) % 3; fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); };
+  const fb = $('fastbtn'); if (fb) fb.onclick = () => { gameMode = (gameMode + 1) % 4; fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); };
   const pv = $('pvpbtn'); if (pv) pv.onclick = () => { net.pvp = !net.pvp; broadcastLobby(); };
   const h = $('hostbtn'); if (h) h.onclick = () => { audioInit(); hostRoom(0); };
   const j = $('joinbtn'), c = $('code');
@@ -2485,9 +2486,10 @@ function newGame() {
   audioInit();
   score = 0; level = 1; lives = 3; ammo = 16; tier = 0; wIdx = 0; ghost = false;
   if (!net.role) seed = (Math.random() * 1e9) | 0;
+  if (gameMode === 3) { tier = 3; wIdx = 3; ammo = 99; }
   clearPowers(); buildLevel(1); drawMapBase();
-  buildGun(0); refreshChips(); updateLives(); refreshDots(); resetActors();
-  enterPlay(); toast(['EAT. SHOOT. SURVIVE.', 'FAST ZOMBS. RUN.', 'INSANE. GOOD LUCK.'][gameMode]);
+  buildGun(wIdx); refreshChips(); updateLives(); refreshDots(); resetActors();
+  enterPlay(); toast(['EAT. SHOOT. SURVIVE.', 'FAST ZOMBS. RUN.', 'INSANE. GOOD LUCK.', 'DEV MODE. YOU CANNOT DIE.'][gameMode]);
 }
 function nextLevel() {
   level++; ammo = Math.min(99, ammo + 10);

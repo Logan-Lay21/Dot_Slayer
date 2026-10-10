@@ -86,6 +86,7 @@ function specFx(s, old, st) {
   } else if (s.kind === 'stalker') {
     if (st === SK.STALK) { tone(60, 0.9, 'sawtooth', volAt(s.x, s.z, 0.06), -20); burst(s.x, fy + 0.2, s.z, 0x6b5a3a, 10, 4); }
     else if (st === SK.DEAD) { burst(s.x, fy + 1.2, s.z, 0x7a0714, 14, 5); noise(0.2, volAt(s.x, s.z, 0.1)); }
+    else if (st === SK.GONE) { burst(s.x, fy + 0.4, s.z, 0x6b5a3a, 14, 4); noise(0.12, volAt(s.x, s.z, 0.06)); }
   } else if (s.kind === 'ambusher') {
     if (st === AM.LEAP) { tone(1400, 0.3, 'sawtooth', volAt(s.x, s.z, 0.09), -950); noise(0.15, volAt(s.x, s.z, 0.08)); }
     else if (st === AM.GROUND) { shakeAt(s.x, s.z, 0.14); burst(s.x, s.y + 0.2, s.z, 0x3a2a4a, 8, 4); tone(120, 0.12, 'square', volAt(s.x, s.z, 0.1), -50); }

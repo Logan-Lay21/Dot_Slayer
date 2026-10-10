@@ -105,10 +105,12 @@ function simCharger(s, dt) {
   }
 }
 function nearestCrumb(t, x, z) { let bi = 0, bd = 1e9; for (let i = 0; i < t.length; i++) { const d = dist2d(t[i].x, t[i].z, x, z); if (d < bd) { bd = d; bi = i; } } return bi; }
+/* the Stalker is the one zombie that leaves after he hurts you */
+function despawnStalker(s) { if (s.kind === 'stalker' && s.st === SK.STALK) { s.spent = true; setSpState(s, SK.GONE); } }
 function recordTrails() {
   eachPlayer(p => {
     const t = trails[p.id] || (trails[p.id] = []), l = t[t.length - 1];
-    if (l && dist2d(l.x, l.z, p.x, p.z) > 6) t.length = 0; /* teleported (respawn): start a fresh trail */
+    if (l && dist2d(l.x, l.z, p.x, p.z) > 6) { t.length = 0; specials.forEach(s => { if (s.tid === p.id) despawnStalker(s); }); } /* teleported (respawn): fresh trail, and a Stalker that was hunting them is gone, so he can never spawn kill */
     if (!t.length || dist2d(t[t.length - 1].x, t[t.length - 1].z, p.x, p.z) > 1.2) {
       t.push({ x: p.x, z: p.z });
       if (t.length > 1500) { t.shift(); specials.forEach(s => { if (s.kind === 'stalker' && s.tid === p.id) s.idx = Math.max(0, s.idx - 1); }); }
@@ -254,8 +256,8 @@ function specialsContact(dt) {
     eachPlayer(p => {
       const n = touchDamage(s, p.x, p.z, p.py);
       if (!n) return;
-      if (p.self) { if (invuln > 0) return; if (n >= 900) { noise(0.25, 0.2); tone(160, 0.12, 'square', 0.2, -120); toast('NECK SNAPPED', '#ff3b4e'); } takeDamage(n, -1); }
-      else { if (p.p.inv > 0) return; netToPeer(p.id, { t: 'dmg', n, by: -1 }); p.p.inv = 1.2; }
+      if (p.self) { if (invuln > 0) return; if (n >= 900) { despawnStalker(s); noise(0.25, 0.2); tone(160, 0.12, 'square', 0.2, -120); toast('NECK SNAPPED', '#ff3b4e'); } takeDamage(n, -1); }
+      else { if (p.p.inv > 0) return; despawnStalker(s); netToPeer(p.id, { t: 'dmg', n, by: -1 }); p.p.inv = 1.2; }
       if (s.kind === 'wall') s.pause = 1.2;
       if (s.kind === 'ambusher') s.biteCd = 9;
     });

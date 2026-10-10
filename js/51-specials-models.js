@@ -109,7 +109,7 @@ function resetSpecial(s) {
   s.lastDir = null; s.st = 0; s.stT = 0; s.pause = 0; s.cool = 1.5; s.state = 'active'; s.flashT = 0; s.nseen = false;
   s.mesh.visible = s.kind !== 'stalker'; s.mesh.scale.set(1, 1, 1); s.mesh.scale.setScalar(s.kind === 'charger' ? 1.3 : s.kind === 'ambusher' ? 0.8 : s.kind === 'stalker' ? 1.1 : 1);
   if (s.kind === 'wall') s.mesh.scale.y = WALL_BH / 4.45;
-  if (s.kind === 'stalker') { s.cool = 14; s.tid = -1; s.idx = 0; s.nseen = false; }
+  if (s.kind === 'stalker') { s.cool = 14; s.tid = -1; s.idx = 0; s.nseen = false; if (s.spent) s.st = SK.GONE; } /* a Stalker who already got his kill stays gone for the level */
   if (s.kind !== 'ambusher' && s.kind !== 'stalker') { s.c = s.nc = Math.floor(s.x / CS); s.r = s.nr = Math.floor(s.z / CS); s.dir = [0, 0]; }
   if (s.kind === 'wall') pickChase(s);
   else if (s.kind === 'charger') pickWander(s);

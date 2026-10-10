@@ -20,7 +20,7 @@ function wallTopAt(x, z, feet) {
 function wallHalf(s) { return Math.abs(Math.sin(s.rot)) > 0.7 ? [1.3, 1.85] : [1.85, 1.3]; }
 function footstep(v, pitch) { noise(0.045, v); tone(75 * pitch, 0.05, 'sine', v * 1.2, -20); }
 const SP_NAMES = { wall: 'THE WALL', charger: 'THE CHARGER', ambusher: 'THE AMBUSHER', stalker: 'THE STALKER' };
-const SK = { DORMANT: 0, STALK: 1, DEAD: 2 };
+const SK = { DORMANT: 0, STALK: 1, DEAD: 2, GONE: 3 }; /* GONE: he got his kill (or his target respawned) and vanished for the rest of the level */
 const CH = { WANDER: 0, YELL: 1, CHARGE: 2, SPLAT: 3, RECOVER: 4, DEAD: 5, BOUNCE: 6, DAZED: 7 };
 const stunned = s => s.st === CH.SPLAT || s.st === CH.DAZED;
 const AM = { PERCH: 0, LEAP: 1, GROUND: 2, RETURN: 3, DEAD: 4 };

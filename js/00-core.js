@@ -29,7 +29,7 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.9.8';
+const VERSION = '0.9.10';
 let playerCount = 1;
 const MAXE = 8, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;

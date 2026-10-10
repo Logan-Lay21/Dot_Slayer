@@ -38,6 +38,9 @@ button{font-family:inherit}
 .tr{position:absolute;top:16px;right:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 #map{width:min(150px,34vw);height:auto;border:1px solid var(--line);border-radius:6px;background:rgba(5,6,15,.72)}
 #ver{position:fixed;left:8px;bottom:4px;z-index:5;font:700 10px/1 var(--body,sans-serif);letter-spacing:.12em;color:var(--dim);opacity:.7;pointer-events:none}
+#ver.home{z-index:60;left:auto;right:14px;top:12px;bottom:auto;font-size:13px;opacity:.9}
+.gp p{margin:0 0 10px;font-weight:500}.gp .rules{margin-bottom:10px}.gtag{margin-bottom:8px}.gtag .sw{width:22px;height:22px;display:inline-block}
+.gnav{display:flex;gap:10px;justify-content:space-between;padding-top:6px}.gnav .btn[disabled]{opacity:.35;cursor:default}
 #lives{display:flex;gap:6px}
 .pip{width:14px;height:14px;border-radius:50%;background:var(--blood);box-shadow:0 0 8px rgba(255,59,78,.6)}
 .pip.off{background:transparent;border:2px solid #4a2330;box-shadow:none}
@@ -171,8 +174,9 @@ const TEMPLATE = [
   '#.................#',
   '###################'
 ];
-const VERSION = '0.8.1';
-const MAXE = 6, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
+const VERSION = '0.9.0';
+let playerCount = 1;
+const MAXE = 8, MAXR = 21 + 2 * MAXE, MAXC = 19 + 2 * MAXE;
 let ROWS = TEMPLATE.length, COLS = TEMPLATE[0].length, OFF = 0;
 const CS = 4, WALL_H = 4.2, CEIL_H = 11, EYE = 2.05, RAMP_H = 1.3;
 const walls = [], dotAt = [], SPAWNS = [], dotList = [], grid = [], hgt = [], rampRuns = [];
@@ -214,15 +218,39 @@ function canvasTex(w, h, draw, rx, ry) {
   t.anisotropy = 4;
   return t;
 }
+/* each level gets its own wall color */
+const PALS = [
+  { bg: '#070b33', line: '#4057ff', soft: 'rgba(110,130,255,.35)', flo: '#171d4d' },
+  { bg: '#04210f', line: '#2fdc6a', soft: 'rgba(110,255,160,.35)', flo: '#0e3a1e' },
+  { bg: '#2a0a2c', line: '#ff4ad8', soft: 'rgba(255,130,235,.35)', flo: '#4a1450' },
+  { bg: '#2e1404', line: '#ff8a1f', soft: 'rgba(255,180,100,.35)', flo: '#4d2508' },
+  { bg: '#04252e', line: '#27e0ff', soft: 'rgba(120,235,255,.35)', flo: '#0b3b48' },
+  { bg: '#2e0609', line: '#ff3b4e', soft: 'rgba(255,120,130,.35)', flo: '#4d1017' },
+  { bg: '#1b0a38', line: '#9d6bff', soft: 'rgba(190,150,255,.35)', flo: '#2e1560' },
+  { bg: '#2b2604', line: '#ffd84a', soft: 'rgba(255,235,130,.35)', flo: '#483f0a' }
+];
+let curPal = PALS[0];
 const wallTex = canvasTex(128, 128, (g, w, h) => {
-  g.fillStyle = '#070b33'; g.fillRect(0, 0, w, h);
-  g.strokeStyle = '#4057ff'; g.lineWidth = 7; g.strokeRect(4, 4, w - 8, h - 8);
-  g.strokeStyle = 'rgba(110,130,255,.35)'; g.lineWidth = 2; g.strokeRect(20, 20, w - 40, h - 40);
+  g.fillStyle = curPal.bg; g.fillRect(0, 0, w, h);
+  g.strokeStyle = curPal.line; g.lineWidth = 7; g.strokeRect(4, 4, w - 8, h - 8);
+  g.strokeStyle = curPal.soft; g.lineWidth = 2; g.strokeRect(20, 20, w - 40, h - 40);
 });
 const floorTex = canvasTex(64, 64, (g, w, h) => {
   g.fillStyle = '#090b1c'; g.fillRect(0, 0, w, h);
-  g.strokeStyle = '#171d4d'; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
+  g.strokeStyle = curPal.flo; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
 }, COLS, ROWS);
+function setPalette(lv) {
+  curPal = PALS[(lv - 1) % PALS.length];
+  let g = wallTex.image.getContext('2d'), w = 128, h = 128;
+  g.fillStyle = curPal.bg; g.fillRect(0, 0, w, h);
+  g.strokeStyle = curPal.line; g.lineWidth = 7; g.strokeRect(4, 4, w - 8, h - 8);
+  g.strokeStyle = curPal.soft; g.lineWidth = 2; g.strokeRect(20, 20, w - 40, h - 40);
+  wallTex.needsUpdate = true;
+  g = floorTex.image.getContext('2d'); w = 64; h = 64;
+  g.fillStyle = '#090b1c'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = curPal.flo; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
+  floorTex.needsUpdate = true;
+}
 
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
 floor.rotation.x = -Math.PI / 2; scene.add(floor);
@@ -269,7 +297,7 @@ function mkRnd(a0) {
   return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 function genGrid(sd, lv) {
-  const e = Math.min(MAXE, Math.floor((lv - 1) / 3)), R = 21 + 2 * e, C = 19 + 2 * e, mid = (C - 1) / 2;
+  const e = Math.min(MAXE, Math.floor((lv - 1) / 3) + (playerCount - 1)), R = 21 + 2 * e, C = 19 + 2 * e, mid = (C - 1) / 2;
   const rnd = mkRnd((Math.imul(sd | 0, 2654435761) ^ Math.imul(lv, 40503) ^ 0x9e3779b9) >>> 0);
   const g = []; for (let r = 0; r < R; r++) g.push(new Array(C).fill('#'));
   const cr0 = 6 + e, cc0 = 4 + e;
@@ -417,7 +445,9 @@ function floorY(x, z) {
 const rampGroup = new THREE.Group(); scene.add(rampGroup);
 const rampMat = new THREE.MeshStandardMaterial({ color: 0x2a3bd8, emissive: 0x1423a0, emissiveIntensity: 0.7, roughness: 0.6 });
 const rampEdge = new THREE.LineBasicMaterial({ color: 0x46e6ff });
+let mapLevel = 1;
 function genMap(sd, lv) {
+  mapLevel = lv;
   const { g, runs, e, R, C } = genGrid(sd, lv);
   OFF = e; ROWS = R; COLS = C;
   walls.length = 0; dotAt.length = 0; hgt.length = 0; grid.length = 0;
@@ -444,6 +474,7 @@ function genMap(sd, lv) {
   dotList.forEach(d => { if (d.big) { d.mesh = bigMeshes[bigs.length]; bigs.push(d); } else { d.idx = smalls.length; smalls.push(d); } });
 }
 function applyMap() {
+  setPalette(mapLevel);
   floor.scale.set(COLS * CS, ROWS * CS, 1); floor.position.set(COLS * CS / 2, 0, ROWS * CS / 2); floorTex.repeat.set(COLS, ROWS);
   ceil.scale.set(COLS * CS, ROWS * CS, 1); ceil.position.set(COLS * CS / 2, CEIL_H, ROWS * CS / 2);
   gateBars.forEach(b => { b.visible = false; });
@@ -752,7 +783,7 @@ function placeZombie(z, idx, delay, fresh) {
   z.rot = Math.random() * 6.28; z.dirtK = -1;
   z.c = z.nc = s.c; z.r = z.nr = s.r; z.x = (s.c + 0.5) * CS; z.z = (s.r + 0.5) * CS;
   z.dir = [0, 0]; z.state = 'house'; z.timer = delay; z.slow = 0; z.deadT = 0; resetLimbs(z);
-  z.hp = z.maxHp = 3 + (level - 1);
+  z.hp = z.maxHp = 3 + (level - 1) + (playerCount - 1);
   z.mesh.visible = true; z.mesh.rotation.x = 0; z.mesh.position.set(z.x, floorY(z.x, z.z), z.z);
   z.fill.scale.x = 1; z.flashT = 0; z.bar.visible = false; setFlash(z, false);
 }
@@ -1120,15 +1151,15 @@ function movePlayer(dt) {
   if (!blockedP(px, pz + vz, R) && floorY(px, pz + vz) <= py + 0.6) pz += vz;
   for (const s of specials) {
     if (s.kind !== 'wall') continue;
-    const hh = 2.35, ddx = px - s.x, ddz = pz - s.z;
-    if (Math.abs(ddx) < hh && Math.abs(ddz) < hh && py < floorY(s.x, s.z) + WALL_BH) {
+    const wh = wallHalf(s), hhx = wh[0] + 0.25, hhz = wh[1] + 0.25, ddx = px - s.x, ddz = pz - s.z;
+    if (Math.abs(ddx) < hhx && Math.abs(ddz) < hhz && py < floorY(s.x, s.z) + WALL_BH - 0.55) {
       let nx = px, nz = pz;
-      if (hh - Math.abs(ddx) < hh - Math.abs(ddz)) nx = s.x + (ddx < 0 ? -hh : hh); else nz = s.z + (ddz < 0 ? -hh : hh);
+      if (hhx - Math.abs(ddx) < hhz - Math.abs(ddz)) nx = s.x + (ddx < 0 ? -hhx : hhx); else nz = s.z + (ddz < 0 ? -hhz : hhz);
       if (!blockedP(nx, nz, R)) { px = nx; pz = nz; }
     }
   }
-  const gy = floorY(px, pz);
-  if ((keys.Space || jumpHeld) && onGround) { vy = 8.6 * (pu.haste > 0 ? 1.1 : 1); onGround = false; tone(380, 0.09, 'square', 0.03, 260); }
+  const gy = Math.max(floorY(px, pz), wallTopAt(px, pz, py));
+  if ((keys.Space || jumpHeld) && onGround) { vy = 8.6 * (pu.haste > 0 ? 1.1 : 1) + (gy > 0.5 ? 1.5 : 0); onGround = false; tone(380, 0.09, 'square', 0.03, 260); }
   if (onGround) {
     if (py - gy > 0.35) onGround = false; else { py = gy; vy = 0; }
   }
@@ -1247,12 +1278,25 @@ function buildLevel(lv) { genMap(seed, lv); applyMap(); genPits(lv); buildSpecia
    Every peer builds the same specials from the room seed and the level, the host runs them, clients animate puppets. */
 const specials = [];
 let stepN = 0;
-const WALL_BH = 2.6; /* low enough to hop over from the top of a ramp */
+const WALL_BH = 2.0; /* low enough to hop over from the top of a ramp, too tall to hop from flat ground */
 const trails = {};
+/* ground height under (x,z) counting the top of the Wall: you can land on it and walk across */
+function wallTopAt(x, z, feet) {
+  let top = -1;
+  for (const s of specials) {
+    if (s.kind !== 'wall') continue;
+    const h = wallHalf(s);
+    if (Math.abs(x - s.x) < h[0] + 0.1 && Math.abs(z - s.z) < h[1] + 0.1) { const t = floorY(s.x, s.z) + WALL_BH; if (feet >= t - 0.55) top = Math.max(top, t); }
+  }
+  return top;
+}
+/* the Wall spans the hall but is not deep, so a good jump clears it: half sizes along x and z */
+function wallHalf(s) { return Math.abs(Math.sin(s.rot)) > 0.7 ? [1.3, 1.85] : [1.85, 1.3]; }
 function footstep(v, pitch) { noise(0.045, v); tone(75 * pitch, 0.05, 'sine', v * 1.2, -20); }
 const SP_NAMES = { wall: 'THE WALL', charger: 'THE CHARGER', ambusher: 'THE AMBUSHER', stalker: 'THE STALKER' };
 const SK = { DORMANT: 0, STALK: 1, DEAD: 2 };
-const CH = { WANDER: 0, YELL: 1, CHARGE: 2, SPLAT: 3, RECOVER: 4, DEAD: 5 };
+const CH = { WANDER: 0, YELL: 1, CHARGE: 2, SPLAT: 3, RECOVER: 4, DEAD: 5, BOUNCE: 6, DAZED: 7 };
+const stunned = s => s.st === CH.SPLAT || s.st === CH.DAZED;
 const AM = { PERCH: 0, LEAP: 1, GROUND: 2, RETURN: 3, DEAD: 4 };
 let shakeMag = 0;
 const dist2d = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
@@ -1265,12 +1309,12 @@ function volAt(x, z, v) { return v * Math.max(0.15, 1 - dist2d(x, z, px, pz) / 4
 /* chance per round that each kind shows up; it climbs every level, and INSANE starts high */
 function specialChances(lv) {
   if (gameMode === 3) return { wall: 1, charger: 1, ambusher: 1, stalker: 1 };
-  const ins = gameMode === 2, k = lv - 1, cap = ins ? 0.97 : 0.9;
+  const ins = gameMode === 2, k = lv - 1, cap = ins ? 0.97 : 0.9, pb = 0.12 * (playerCount - 1);
   return {
-    wall: Math.min(cap, (ins ? 0.5 : 0.08) + (ins ? 0.07 : 0.06) * k),
-    charger: Math.min(cap, (ins ? 0.6 : 0.15) + (ins ? 0.08 : 0.07) * k),
-    ambusher: Math.min(cap, (ins ? 0.7 : 0.2) + (ins ? 0.08 : 0.07) * k),
-    stalker: Math.min(ins ? 0.97 : 0.75, (ins ? 0.4 : 0.06) + (ins ? 0.07 : 0.05) * k)
+    wall: Math.min(cap, (ins ? 0.5 : 0.08) + (ins ? 0.07 : 0.06) * k + pb),
+    charger: Math.min(cap, (ins ? 0.6 : 0.15) + (ins ? 0.08 : 0.07) * k + pb),
+    ambusher: Math.min(cap, (ins ? 0.7 : 0.2) + (ins ? 0.08 : 0.07) * k + pb),
+    stalker: Math.min(ins ? 0.97 : 0.75, (ins ? 0.4 : 0.06) + (ins ? 0.07 : 0.05) * k + pb)
   };
 }
 function planSpecials(lv) {
@@ -1300,11 +1344,11 @@ function planSpecials(lv) {
   const rW = rnd(), rC = rnd(), rA = rnd(), rC2 = rnd(), rN = rnd(), rS = rnd();
   if (rW < ch.wall) { const o = pickFrom(farOpen, used); if (o) plan.push({ kind: 'wall', c: o.c, r: o.r }); }
   if (rC < ch.charger) {
-    const n = ins && lv >= 6 && rC2 < 0.5 ? 2 : 1;
+    const n = ((ins && lv >= 6) || playerCount >= 3) && rC2 < 0.5 ? 2 : 1;
     for (let i = 0; i < n; i++) { const o = pickFrom(farOpen, used); if (o) plan.push({ kind: 'charger', c: o.c, r: o.r }); }
   }
   if (rA < ch.ambusher) {
-    const n = gameMode === 3 ? 3 : Math.min(ins ? 7 : 4, (ins ? 2 : 1) + Math.floor(rN * ((ins ? 2 : 1) + lv / (ins ? 3 : 4))));
+    const n = gameMode === 3 ? 3 : Math.min(ins ? 8 : 6, (ins ? 2 : 1) + (playerCount - 1) + Math.floor(rN * ((ins ? 2 : 1) + lv / (ins ? 3 : 4))));
     for (let i = 0; i < n; i++) {
       const o = pickFrom(tops, used); if (!o) break;
       plan.push({ kind: 'ambusher', c: o.c, r: o.r, d: o.d });
@@ -1422,7 +1466,7 @@ function resetSpecial(s) {
   s.x = s.tx = h.x; s.z = s.tz = h.z; s.y = s.ty = h.y; s.rot = s.trot = h.rot;
   s.st = 0; s.stT = 0; s.pause = 0; s.cool = 1.5; s.state = 'active'; s.flashT = 0; s.nseen = false;
   s.mesh.visible = s.kind !== 'stalker'; s.mesh.scale.set(1, 1, 1); s.mesh.scale.setScalar(s.kind === 'charger' ? 1.3 : s.kind === 'ambusher' ? 0.8 : s.kind === 'stalker' ? 1.1 : 1);
-  if (s.kind === 'wall') s.mesh.scale.y = WALL_BH / 4.45;
+  if (s.kind === 'wall') s.mesh.scale.y = 0.45;
   if (s.kind === 'stalker') { s.cool = 14; s.tid = -1; s.idx = 0; s.nseen = false; }
   if (s.kind !== 'ambusher' && s.kind !== 'stalker') { s.c = s.nc = Math.floor(s.x / CS); s.r = s.nr = Math.floor(s.z / CS); s.dir = [0, 0]; }
   if (s.kind === 'wall') pickChase(s);
@@ -1475,7 +1519,7 @@ function gridMove(s, dt, speed, pick) {
   }
 }
 function setSpState(s, st) {
-  const old = s.st; s.st = st; s.stT = 0;
+  const old = s.st; s.prev = old; s.st = st; s.stT = 0;
   specFx(s, old, st);
 }
 function chargerSees(s) {
@@ -1490,14 +1534,20 @@ function chargerSees(s) {
   });
   return found;
 }
+function wallHit(s, r) { for (const w of specials) { if (w.kind !== 'wall') continue; const h = wallHalf(w); if (Math.abs(s.x - w.x) < h[0] + 0.8 && Math.abs(s.z - w.z) < h[1] + 0.8) return w; } return null; }
 function simCharger(s, dt) {
   const mult = [1, 1.15, 1.3, 1][gameMode];
   s.stT += dt; s.anim += dt;
   switch (s.st) {
-    case CH.WANDER:
+    case CH.WANDER: {
+      s.bumpCd = Math.max(0, (s.bumpCd || 0) - dt);
+      if (s.bumpCd <= 0 && wallHit(s, 2.6)) { /* never walk through the Wall: turn back */
+        let t = s.c; s.c = s.nc; s.nc = t; t = s.r; s.r = s.nr; s.nr = t; s.dir = [-s.dir[0], -s.dir[1]]; s.bumpCd = 1.2;
+      }
       gridMove(s, dt, 2.6 * mult, pickWander);
       if (chargerSees(s)) { s.cdir = [s.dir[0], s.dir[1]]; s.rot = Math.atan2(-s.cdir[0], -s.cdir[1]); setSpState(s, CH.YELL); }
       break;
+    }
     case CH.YELL:
       s.rot = Math.atan2(-s.cdir[0], -s.cdir[1]);
       if (s.stT > 1.15) setSpState(s, CH.CHARGE);
@@ -1506,6 +1556,13 @@ function simCharger(s, dt) {
       const sp = 17 * mult;
       s.x += s.cdir[0] * sp * dt; s.z += s.cdir[1] * sp * dt;
       s.c = Math.floor(s.x / CS); s.r = Math.floor(s.z / CS);
+      const bw = wallHit(s, 2.6);
+      if (bw) { /* unstoppable force meets immovable object */
+        if (s.cdir[0]) s.x = bw.x - s.cdir[0] * (wallHalf(bw)[0] + 0.85);
+        if (s.cdir[1]) s.z = bw.z - s.cdir[1] * (wallHalf(bw)[1] + 0.85);
+        s.c = Math.floor(s.x / CS); s.r = Math.floor(s.z / CS);
+        bw.bumpT = 0.6; setSpState(s, CH.BOUNCE); break;
+      }
       const prx = s.x + s.cdir[0] * 1.1, prz = s.z + s.cdir[1] * 1.1;
       if (wallAt(prx, prz)) {
         if (s.cdir[0]) { const edge = (s.cdir[0] > 0 ? Math.floor(prx / CS) : Math.floor(prx / CS) + 1) * CS; s.x = edge - s.cdir[0] * 1.05; }
@@ -1517,6 +1574,16 @@ function simCharger(s, dt) {
     }
     case CH.SPLAT:
       if (s.stT > [3.4, 3.0, 2.6, 3.4][gameMode]) setSpState(s, CH.RECOVER);
+      break;
+    case CH.BOUNCE: {
+      const v = 11 * Math.max(0, 1 - s.stT / 0.55), bx = -s.cdir[0] * v * dt, bz = -s.cdir[1] * v * dt;
+      if (!wallAt(s.x + bx - s.cdir[0] * 1.1, s.z + bz - s.cdir[1] * 1.1)) { s.x += bx; s.z += bz; }
+      s.c = Math.floor(s.x / CS); s.r = Math.floor(s.z / CS);
+      if (s.stT > 0.55) setSpState(s, CH.DAZED);
+      break;
+    }
+    case CH.DAZED:
+      if (s.stT > [2.8, 2.5, 2.2, 2.8][gameMode]) setSpState(s, CH.RECOVER);
       break;
     case CH.RECOVER:
       if (s.stT > 0.9) {
@@ -1577,7 +1644,7 @@ function simWall(s, dt) {
   /* the Wall never walks through anybody: it stops against the first player in its way */
   let blocked = false;
   const lx = s.x + s.dir[0] * 0.6, lz = s.z + s.dir[1] * 0.6;
-  eachPlayer(p => { if (Math.abs(p.x - lx) < 2.45 && Math.abs(p.z - lz) < 2.45 && p.py < floorY(s.x, s.z) + WALL_BH) blocked = true; });
+  eachPlayer(p => { if (Math.abs(p.x - lx) < wallHalf(s)[0] + 0.6 && Math.abs(p.z - lz) < wallHalf(s)[1] + 0.6 && p.py < floorY(s.x, s.z) + WALL_BH - 0.55) blocked = true; });
   if (blocked) return;
   const sp = Math.min(2.8, 1.7 + 0.05 * (level - 1)) * [1, 1.25, 1.5, 1][gameMode];
   gridMove(s, dt, sp, pickChase);
@@ -1636,7 +1703,7 @@ function isDead(s) { return (s.kind === 'charger' && s.st === CH.DEAD) || (s.kin
 /* contact damage for the local player and (as host) for every remote player */
 function touchDamage(s, x, z, pyy) {
   if (isDead(s)) return 0;
-  if (s.kind === 'wall') return Math.abs(x - s.x) < 2.6 && Math.abs(z - s.z) < 2.6 && pyy < floorY(s.x, s.z) + WALL_BH ? 35 : 0;
+  if (s.kind === 'wall') return Math.abs(x - s.x) < wallHalf(s)[0] + 0.5 && Math.abs(z - s.z) < wallHalf(s)[1] + 0.5 && pyy < floorY(s.x, s.z) + WALL_BH - 0.55 ? 35 : 0;
   if (s.kind === 'charger') {
     if (s.st > CH.CHARGE) return 0;
     return dist2d(x, z, s.x, s.z) < 1.7 && Math.abs(pyy - floorY(s.x, s.z)) < 1.3 ? (s.st === CH.CHARGE ? 40 : 15) : 0;
@@ -1679,6 +1746,7 @@ function specialRay(s, reach, radius) {
     return t == null ? null : { t, zone: 'body' };
   }
   if (s.kind === 'charger') {
+    if (s.st === CH.DAZED) { const hd = rayCyl(s.x, s.z, floorY(s.x, s.z), 1.2, 1.5, reach); return hd ? { t: hd.t, zone: hd.rel > 0.9 ? 'head' : 'body' } : null; }
     const h = rayCyl(s.x, s.z, floorY(s.x, s.z), 3.2, radius + 0.25, reach); if (!h) return null;
     return { t: h.t, zone: h.rel > 2.3 ? 'head' : 'body' };
   }
@@ -1693,7 +1761,7 @@ function specialRay(s, reach, radius) {
 function hitSpecial(s, w, zone, tHit) {
   el.cross.classList.add('hit'); setTimeout(() => el.cross.classList.remove('hit'), 90);
   const px2 = _o.x + _d.x * tHit, py2 = _o.y + _d.y * tHit, pz2 = _o.z + _d.z * tHit;
-  const vulnerable = s.kind === 'ambusher' || s.kind === 'stalker' || (s.kind === 'charger' && s.st === CH.SPLAT);
+  const vulnerable = s.kind === 'ambusher' || s.kind === 'stalker' || (s.kind === 'charger' && stunned(s));
   if (!vulnerable) { burst(px2, py2, pz2, 0xdfe6ff, 4, 4); tone(s.kind === 'wall' ? 110 : 1500, 0.05, s.kind === 'wall' ? 'square' : 'triangle', 0.04); return; }
   if (zone === 'head') { el.cross.classList.add('head'); setTimeout(() => el.cross.classList.remove('head'), 160); tone(900, 0.07, 'square', 0.05); }
   if (net.role === 'client') {
@@ -1706,7 +1774,7 @@ function hitSpecial(s, w, zone, tHit) {
 function applySpecialHit(s, dmg, by, zone) {
   if (isDead(s)) return;
   if (s.kind === 'wall') return;
-  if (s.kind === 'charger' && s.st !== CH.SPLAT) return;
+  if (s.kind === 'charger' && !stunned(s)) return;
   if (s.kind === 'stalker' && (s.st !== SK.STALK || s.stT < 1.2)) return;
   const d = zone === 'head' ? dmg * 2.5 : dmg;
   s.hp -= d; s.flashT = 0.1; flashSpecial(s, true);
@@ -1733,6 +1801,10 @@ function specFx(s, old, st) {
       shakeAt(s.x, s.z, 0.5); noise(0.4, volAt(s.x, s.z, 0.2)); tone(70, 0.35, 'square', volAt(s.x, s.z, 0.16), -40);
       burst(s.x + s.cdir[0], fy + 1.6, s.z + s.cdir[1], 0xdfe6ff, 16, 6);
       if (dist2d(s.x, s.z, px, pz) < 40) toast('HE IS STUNNED. SHOOT HIM!', '#46e6ff');
+    } else if (st === CH.BOUNCE) {
+      shakeAt(s.x, s.z, 0.55); noise(0.45, volAt(s.x, s.z, 0.22)); tone(60, 0.4, 'square', volAt(s.x, s.z, 0.18), -30);
+      burst(s.x + s.cdir[0] * 1.6, fy + 1.2, s.z + s.cdir[1] * 1.6, 0xdfe6ff, 22, 7);
+      if (dist2d(s.x, s.z, px, pz) < 40) toast('THE CHARGER BOUNCED OFF THE WALL. SHOOT HIM!', '#46e6ff');
     } else if (st === CH.DEAD) {
       noise(0.4, volAt(s.x, s.z, 0.14)); burst(s.x, fy + 1.5, s.z, 0x2f6bff, 20, 7); burst(s.x, fy + 1.5, s.z, 0x8fae86, 10, 5);
       spawnChunk(s.x, fy + 3.0, s.z, headGeo, gibMatFor(0xffc21a), 7, 6);
@@ -1769,9 +1841,9 @@ const clampS = k => Math.max(0, Math.min(1, k));
 function animCharger(s, dt) {
   const m = s.mesh, t = s.stT, fy = floorY(s.x, s.z), L = s.legs, A = s.arms;
   m.position.set(s.x, fy, s.z); m.rotation.set(0, s.rot, 0);
-  s.up.rotation.set(0, 0, 0); s.head.rotation.set(0, 0, 0); s.excl.visible = false; s.stars.visible = false; s.mouth.scale.y = 1;
+  s.up.rotation.set(0, 0, 0); s.head.rotation.set(0, 0, 0); s.excl.visible = false; s.stars.visible = false; s.mouth.scale.y = 1; s.stars.position.set(0, 2.55, 0);
   L[0].rotation.set(0, 0, 0); L[1].rotation.set(0, 0, 0); A[0].rotation.set(0, 0, 0); A[1].rotation.set(0, 0, 0);
-  s.bar.visible = s.hp < s.maxHp && s.st !== CH.DEAD && (s.st === CH.SPLAT || s.st === CH.RECOVER);
+  s.bar.visible = s.hp < s.maxHp && s.st !== CH.DEAD && (stunned(s) || s.st === CH.RECOVER);
   switch (s.st) {
     case CH.WANDER: {
       const w = s.anim * 4.2;
@@ -1810,12 +1882,28 @@ function animCharger(s, dt) {
       if (t > 2.4) m.position.x += Math.sin(t * 60) * 0.025;
       break;
     }
+    case CH.BOUNCE: {
+      const k = clampS(t / 0.55);
+      m.position.y = fy + Math.sin(k * Math.PI) * 1.3; m.rotation.x = 1.3 * k;
+      A[0].rotation.set(0, 0, -2.5); A[1].rotation.set(0, 0, 2.5); L[0].rotation.x = -1.0; L[1].rotation.x = -0.8;
+      s.head.rotation.x = 0.6; s.mouth.scale.y = 5;
+      break;
+    }
+    case CH.DAZED: {
+      m.rotation.x = 1.45; m.position.y = fy + 0.3;
+      A[0].rotation.set(0, 0, -1.4 + Math.sin(t * 3) * 0.1); A[1].rotation.set(0, 0, 1.4 - Math.sin(t * 3) * 0.1);
+      L[0].rotation.x = 0.2 + Math.sin(t * 4) * 0.15; L[1].rotation.x = -0.1 - Math.sin(t * 4) * 0.15; L[0].rotation.z = -0.3; L[1].rotation.z = 0.3;
+      s.head.rotation.z = Math.sin(t * 3) * 0.25;
+      s.stars.visible = true; s.stars.rotation.y = t * 5; s.stars.position.set(0, 1.1, -1.6);
+      break;
+    }
     case CH.RECOVER: {
       const k = clampS(t / 0.9);
+      if (s.prev === CH.DAZED) m.rotation.x = 1.45 * (1 - k), m.position.y = fy + 0.3 * (1 - k);
       A[0].rotation.set(0.5 * (1 - k), 0, -2.25 * (1 - k)); A[1].rotation.set(0.5 * (1 - k), 0, 2.25 * (1 - k));
       L[0].rotation.z = -0.55 * (1 - k); L[1].rotation.z = 0.55 * (1 - k);
       s.up.rotation.x = 0.2 * (1 - k); s.head.rotation.y = Math.sin(t * 10) * 0.6 * (1 - k); s.head.rotation.x = 0.3 * (1 - k);
-      m.rotation.x = -0.1 * (1 - k);
+      if (s.prev !== CH.DAZED) m.rotation.x = -0.1 * (1 - k);
       break;
     }
     default: { /* dead: topples backwards off the wall */
@@ -1926,8 +2014,8 @@ function applySpecialSnap(list) {
     if (a[4] < s.hp && s.fill) { s.flashT = 0.1; flashSpecial(s, true); }
     s.hp = a[4]; s.maxHp = a[5]; if (s.fill) s.fill.scale.x = Math.max(0.001, s.hp / s.maxHp);
     if (a[3] !== s.st) {
-      const old = s.st; s.st = a[3]; s.stT = 0;
-      if (s.kind === 'charger' && (s.st === CH.YELL || s.st === CH.CHARGE || s.st === CH.SPLAT)) {
+      const old = s.st; s.prev = old; s.st = a[3]; s.stT = 0;
+      if (s.kind === 'charger' && (s.st === CH.YELL || s.st === CH.CHARGE || s.st === CH.SPLAT || s.st === CH.BOUNCE || s.st === CH.DAZED)) {
         /* the charge direction is the way he is facing */
         s.cdir = [Math.round(-Math.sin(s.trot)), Math.round(-Math.cos(s.trot))]; s.rot = s.trot;
       }
@@ -2065,7 +2153,8 @@ function hostStart() {
   net.phase = 'play';
   for (const id in net.players) { net.players[id].inv = 3; net.players[id].a = true; }
   seed = (Math.random() * 1e9) | 0;
-  netBroadcast({ t: 'begin', pvp: net.pvp, seed, fast: gameMode });
+  playerCount = 1 + Object.keys(net.players).length;
+  netBroadcast({ t: 'begin', pvp: net.pvp, seed, fast: gameMode, np: playerCount });
   newGame();
 }
 function mpNext() {
@@ -2193,7 +2282,7 @@ function onClientData(m) {
     case 'welcome': if (m.v !== VERSION) { leaveRoom(); showNote('Version mismatch', 'You have v' + VERSION + ', the host has v' + (m.v || '?') + '. Hard refresh the page (clear cache) and join again.'); break; } net.myId = m.id; break;
     case 'lobby': net.lobby = m.list; net.pvp = !!m.pvp; gameMode = m.fast | 0; renderLobby(); break;
     case 'reject': leaveRoom(); showNote('Could not join', m.reason); break;
-    case 'begin': net.phase = 'play'; net.pvp = !!m.pvp; gameMode = m.fast | 0; seed = m.seed | 0; newGame(); if (!isTouch) toast('CLICK TO AIM', '#46e6ff'); break;
+    case 'begin': net.phase = 'play'; net.pvp = !!m.pvp; gameMode = m.fast | 0; seed = m.seed | 0; playerCount = m.np | 0 || 1; newGame(); if (!isTouch) toast('CLICK TO AIM', '#46e6ff'); break;
     case 'snap': applySnap(m); break;
     case 'dot': remoteDot(m.n); break;
     case 'fx': spawnFx(m); break;
@@ -2344,6 +2433,7 @@ function mpHtml() {
 }
 function bindPanel() {
   const l = $('leavebtn'); if (l) l.onclick = leaveRoom;
+  const gb = $('guidebtn'); if (gb) gb.onclick = () => showGuide(0);
   const fb = $('fastbtn'); if (fb) fb.onclick = () => { gameMode = (gameMode + 1) % 4; fb.textContent = modeLabel(); if (net.role === 'host') broadcastLobby(); };
   const pv = $('pvpbtn'); if (pv) pv.onclick = () => { net.pvp = !net.pvp; broadcastLobby(); };
   const h = $('hostbtn'); if (h) h.onclick = () => { audioInit(); hostRoom(0); };
@@ -2415,7 +2505,7 @@ function drawMapBase() {
   mapC.width = mapBase.width = MAPW; mapC.height = mapBase.height = Math.round(ROWS * MS);
   const g = mapBase.getContext('2d');
   g.fillStyle = '#080b24'; g.fillRect(0, 0, mapBase.width, mapBase.height);
-  g.fillStyle = '#4057ff';
+  g.fillStyle = curPal.line;
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (walls[r][c]) g.fillRect(Math.floor(c * MS), Math.floor(r * MS), Math.ceil(MS), Math.ceil(MS));
   g.fillStyle = '#46e6ff';
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (hgt[r][c]) g.fillRect(c * MS, r * MS + MK, MS, MS - 2 * MK);
@@ -2453,17 +2543,38 @@ function panel(title, sub, body, btn, handler) {
   el.panel.hidden = false; bindPanel();
   if (handler) { try { b.focus({ preventScroll: true }); } catch (e) {} }
 }
-const rulesHtml = () => '<ul class="rules"><li>Walk over dots to collect them. Every dot is ammo.</li><li>Big dots are power-ups: haste, shield, frenzy, freeze, medkit, ammo.</li><li>You get a better gun every level (pistol, SMG, shotgun, rail cannon). Die and you drop one.</li><li>Every level is a new random map with ramps to climb and spike pits to jump.</li><li>Sprinting drains the sprint bar. It refills slowly.</li><li>Headshots hit hard. Shoot a leg off and the zombie drops, then crawls at you fast.</li><li>A bite takes 25 health, not a life.</li><li>Four zombies hunt you, each in its own way. Eat every dot to clear the level.</li><li>Specials can show up: the Wall (cannot be killed), the Charger (only hurt when he smacks a wall) and the Ambusher (look up).</li><li>The map grows every 3 levels. INSANE mode: faster zombies and specials almost every round.</li></ul>';
-const rosterHtml = () => '<ul class="roster">' + ZDEF.map(z => '<li><i class="sw" style="background:' + z.css + '"></i><div><b>' + z.name + '</b><span>' + z.role + '</span></div></li>').join('') + '</ul>';
+const basicsHtml = () => '<ul class="rules"><li>Eat dots. Every dot is ammo.</li><li>Shoot the zombies. Eat every dot to clear the level.</li><li>Big dots are power-ups. You get a better gun each level.</li></ul><button id="guidebtn" class="btn alt" type="button">HOW TO PLAY: ZOMBIES, MUTANTS, TIPS</button>';
+const sw = c => '<i class="sw" style="background:' + c + '"></i>';
+const GUIDE = [
+  { t: 'The basics', h: '<ul class="rules"><li>Walk over dots to collect them. Every dot is ammo.</li><li>Eat every dot to clear the level. A new random map follows.</li><li>You unlock a better gun every level: pistol, SMG, shotgun, rail cannon. Die and you drop one.</li><li>A bite takes 25 health, and zombies keep biting until you kill them or lose them.</li><li>Sprinting drains the sprint bar, which refills slowly. Jump the spike pits. Ramps lead up and over things.</li></ul>' },
+  { t: 'Power-ups', h: '<ul class="rules"><li><b>HASTE</b>: run faster and jump higher.</li><li><b>SHIELD</b>: nothing can hurt you for a while.</li><li><b>FRENZY</b>: free ammo and fast fire.</li><li><b>FREEZE</b>: every zombie and mutant stops.</li><li><b>MEDKIT</b>: full health and a spare life.</li><li><b>AMMO CRATE</b>: full magazine.</li></ul><p class="keys">Big dots give a random one.</p>' },
+  { t: 'ROTTER', c: '#ff3b4e', h: '<p><b>Chases you.</b> Heads straight for your position and never gives up. Simple, relentless.</p><p class="keys">Tip: keep moving and use corners.</p>' },
+  { t: 'GNASH', c: '#ff7ac8', h: '<p><b>Cuts you off.</b> Aims at where you are heading, a few cells ahead. Turning around fools him.</p><p class="keys">Tip: do not run in a straight line for long.</p>' },
+  { t: 'MOLD', c: '#46e6ff', h: '<p><b>Flanks you.</b> Uses ROTTER as a guide and comes at you from the opposite side. You get pinched.</p><p class="keys">Tip: when two come from both ends, find a side hall or jump a ramp.</p>' },
+  { t: 'LIMP', c: '#ff9a2e', h: '<p><b>Shy up close.</b> Chases from far away, then loses his nerve near you and runs to his corner.</p><p class="keys">Tip: he is the easiest one to pick off.</p>' },
+  { t: 'Hurting zombies', h: '<ul class="rules"><li>Zombies take several hits. Headshots do 2.5x damage.</li><li>Shoot a leg off: the zombie falls, lies still, then crawls at you fast.</li><li>New zombies claw up out of the floor in the middle of the map. They cannot hurt you or be hurt while rising.</li></ul>' },
+  { t: 'THE WALL', c: '#a9b58a', h: '<p>A zombie so fat it fills the hall. Slow, and it <b>cannot be killed</b>. It blocks bullets and hurts on touch.</p><ul class="rules"><li>It never turns around in a hall.</li><li>Get on a ramp and <b>jump</b> over it.</li></ul>' },
+  { t: 'THE CHARGER', c: '#2f6bff', h: '<p>A football player who wanders and <b>cannot be hurt</b>. If he sees you down a hall, he yells, then charges in a straight line.</p><ul class="rules"><li>Step out of his line or hop a side hall.</li><li>He smacks the wall at the end and is stunned. <b>That is when you shoot him.</b></li><li>If he hits THE WALL he bounces off, dazed, and is shootable.</li></ul>' },
+  { t: 'THE AMBUSHER', c: '#ffe14a', h: '<p>A small crouching zombie that sits on top of a wall and never moves. You only see him if you <b>look up</b>.</p><ul class="rules"><li>Walk right under him and he pounces.</li><li>On the ground he can be shot. Then he leaps back up.</li></ul>' },
+  { t: 'THE STALKER', c: '#cfd6c8', h: '<p>Follows <b>your footsteps</b>, exactly where you walked, at a speed between your walk and your run. If he reaches you he <b>snaps your neck</b>.</p><ul class="rules"><li>Listen. If you hear two sets of footsteps, one is not yours.</li><li>Turn around and shoot him before he arrives.</li></ul>' },
+  { t: 'Modes and squads', h: '<ul class="rules"><li><b>NORMAL</b>, <b>FAST ZOMBS</b> (x1.5 speed), <b>INSANE</b> (faster, mutants almost every round), <b>DEV</b> (cannot die, all mutants, rail gun).</li><li>The map grows every 3 levels.</li><li>More players means a bigger map, tougher zombies and more mutants.</li><li>2 to 4 players. PvP can be toggled in the lobby.</li></ul>' },
+  { t: 'Controls', h: '' }
+];
+function showGuide(i) {
+  i = Math.max(0, Math.min(GUIDE.length - 1, i));
+  const g = GUIDE[i], body = g.h || controlsHtml();
+  panel(g.t, 'How to play ' + (i + 1) + ' of ' + GUIDE.length, '<div class="gp">' + (g.c ? '<div class="gtag">' + sw(g.c) + '</div>' : '') + body + '</div><div class="gnav"><button id="gprev" class="btn alt" type="button"' + (i ? '' : ' disabled') + '>BACK</button><button id="gnext" class="btn alt" type="button"' + (i < GUIDE.length - 1 ? '' : ' disabled') + '>NEXT</button></div>', 'DONE', showTitle);
+  $('gprev').onclick = () => showGuide(i - 1); $('gnext').onclick = () => showGuide(i + 1);
+}
 const controlsHtml = () => isTouch
   ? '<p class="keys">Left thumb moves. Right thumb looks. FIRE shoots. Tap a gun chip to switch.</p>'
   : '<p class="keys">WASD move, mouse look, click or F to fire, Space jump, Shift sprint, 1 to 4 switch gun, M mute, Esc pause. If the mouse will not lock, drag to look.</p>';
 const modeHtml = () => '<div class="mp"><span class="lbl">Game mode</span><div class="mprow"><button id="fastbtn" class="btn alt" type="button">' + modeLabel() + '</button></div></div>';
 function soloStart() { netReset(); newGame(); }
 function showTitle() {
-  state = 'title'; releaseLock();
+  state = 'title'; releaseLock(); $('ver').classList.add('home');
   el.hud.hidden = true; el.touch.hidden = true; el.fire.hidden = true; el.jump.hidden = true;
-  panel('Dot Slayer', 'A first-person maze, four zombies, and a gun that runs on dots.', rulesHtml() + rosterHtml() + controlsHtml() + modeHtml() + mpHtml(), 'PLAY SOLO', soloStart);
+  panel('Dot Slayer', 'Eat dots. Shoot zombies. Survive.', basicsHtml() + controlsHtml() + modeHtml() + mpHtml(), 'PLAY SOLO', soloStart);
 }
 
 /* ---------- flow ---------- */
@@ -2480,12 +2591,12 @@ function resetActors() {
 function enterPlay() {
   el.panel.hidden = true; el.hud.hidden = false;
   if (isTouch) { el.touch.hidden = false; el.fire.hidden = false; el.jump.hidden = false; }
-  state = 'play'; lastT = performance.now(); tryLock();
+  state = 'play'; lastT = performance.now(); tryLock(); $('ver').classList.remove('home');
 }
 function newGame() {
   audioInit();
   score = 0; level = 1; lives = 3; ammo = 16; tier = 0; wIdx = 0; ghost = false;
-  if (!net.role) seed = (Math.random() * 1e9) | 0;
+  if (!net.role) { seed = (Math.random() * 1e9) | 0; playerCount = 1; }
   if (gameMode === 3) { tier = 3; wIdx = 3; ammo = 99; }
   clearPowers(); buildLevel(1); drawMapBase();
   buildGun(wIdx); refreshChips(); updateLives(); refreshDots(); resetActors();
